@@ -355,13 +355,19 @@ $\lambda$ 经济推导与实验解读均由三人讨论完成；AI 工具仅在 
 测试脚本 \verb|clear| 清掉外层计数器（已去除）。
 
 \section{成员分工}\label{app:roles}
-完整分工见 \verb|docs/division_of_labor.md|。第一组按 Data / Modeling / Slides 分工：
-\textbf{22 光华 王溪斌}——主架构、北太天元 \verb|.m| 代码、LP 公式与实现、
-$\lambda$ 经济推导、Monte Carlo 与 sensitivity、数据完整性 11 项校验、
-Makefile 与复现说明、报告主体；不录视频。
-\textbf{23 信科 陈龙}——NYC TLC 数据 pipeline (下载/清洗/面板/cost 矩阵)，Beamer 1--8 页录音。
-\textbf{23 元培 汤平之}——报告与 Beamer 排版 (含 ctex 调试)，图表对齐与说明，
-Beamer 9--15 页录音，PowerPoint 合成与 MP4 导出。
+完整分工见 \verb|docs/division_of_labor.md|。第一组按
+\textbf{Modeling / Data / Presentation} 三个 lead 分工，工作量大致均衡：
+\textbf{22 光华 王溪斌（Modeling Lead）}——LP、Ridge、historical mean、
+evaluate\_dispatch、$\lambda$ 经济推导、11 个 \verb|.m| + 3 个 LP 单元测试、
+报告 §1·§3·§4·§6 + 附录 D/E/I/K、Makefile；不录视频。
+\textbf{23 信科 陈龙（Data Lead）}——Python 7 个数据脚本（下载/清洗/特征/cost/校验）、
+\verb|06_validate.py| 11 项断言、Monte Carlo 实验设计与 \verb|monte_carlo_robustness.m|、
+报告 §2·§5 + 附录 A/B/G/H、Beamer P1--P8 录音（8 帧 ≈ 11.5 min）。
+\textbf{23 元培 汤平之（Presentation Lead）}——
+\verb|07_render_figures.py| 渲 6 张 PNG、\verb|08_build_pptx.py| 自动 PPTX 拼装、
+\verb|export_figure_data.m|、报告 \& Beamer 排版（含 ctex 调试）、报告 §5 解读 +
+附录 C/F/J/L/M、4 个 \verb|docs/*.md|、Beamer P9--P15 录音（7 帧 ≈ 9.5 min）
++ PowerPoint 合成 + MP4 导出。
 
 \section{复现说明}\label{app:reproduce}
 \verb|make data| (下载/清洗/特征/验证) → \verb|make experiment| (北太天元 + 渲图)

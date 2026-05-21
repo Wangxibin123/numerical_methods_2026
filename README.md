@@ -312,14 +312,14 @@ s.t. $\sum_j x_{ij}\le S_i,\;\sum_i x_{ij}+u_j\ge D_j,\;x_{ij},u_j\ge 0$.
 
 ## 9. 团队接手指南
 
-每个成员的详细任务清单：[docs/division_of_labor.md](docs/division_of_labor.md)。
-快速概览：
+按 **Modeling / Data / Presentation** 三个 lead 分工，工作量大致均衡。
+详细清单：[docs/division_of_labor.md](docs/division_of_labor.md)。
 
-| 成员 | 主要负责 | 录视频 |
-| --- | --- | :---: |
-| 22 光华 王溪斌 | 项目主架构 / 北太天元代码 / LP / λ 推导 / Monte Carlo / 数据校验 / Makefile / 报告主体 | ❌ |
-| 23 信科 陈龙 | Python 数据 pipeline / cost 矩阵 / 数据附录 / Beamer P1–P8 录音 | ✅ |
-| 23 元培 汤平之 | 报告与 Beamer 排版 / Beamer P9–P15 录音 / PPTX 合成 / MP4 导出 | ✅ |
+| 成员 | 角色 | 主要负责 | 录视频 |
+| --- | --- | --- | :---: |
+| 22 光华 王溪斌 | Modeling Lead | LP / Ridge / 评估 / 北太天元 11 .m / λ 推导 / 报告 §1·§3·§4·§6 + 4 附录 / Makefile | ❌ |
+| 23 信科 陈龙 | Data Lead | Python 7 数据脚本 + 数据校验 + Monte Carlo / 报告 §2·§5 + 4 附录 / Beamer P1–P8 录音 | ✅ |
+| 23 元培 汤平之 | Presentation Lead | 图渲染 + PPTX 自动化 + 报告 & Beamer 排版 + 5 附录 + 4 文档 / Beamer P9–P15 录音 + MP4 后期 | ✅ |
 
 录音对应到 slide 的详细映射：[docs/division_of_labor.md](docs/division_of_labor.md) 末尾的 Slide → 录制者对应表。
 
