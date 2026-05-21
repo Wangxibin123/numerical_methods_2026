@@ -1,0 +1,3 @@
+model,split,MAE,RMSE,sMAPE
+historical_mean,test,16.861263,28.917495,0.311524
+ridge,test,18.462198,29.787078,0.405290

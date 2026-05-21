@@ -71,9 +71,19 @@ def _aggregate_zone_hour(trips: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFram
     return pu, do
 
 
+# TLC code 264 = "Unknown", 265 = "Outside of NYC" — pathological catch-all
+# location IDs that absorb every unidentifiable trip. Excluding them keeps the
+# rebalancing model focused on real, navigable taxi zones.
+_EXCLUDED_ZONE_IDS = {264, 265}
+
+
 def _select_top_zones(pu: pd.DataFrame, train_end: pd.Timestamp, k: int) -> list[int]:
-    """top K zone by training-period pickup volume — train info only, no leak."""
-    train_pu = pu[pu["hour"] < train_end]
+    """top K zone by training-period pickup volume — train info only, no leak.
+
+    Pathological zone IDs (264 = Unknown, 265 = Outside of NYC) are excluded.
+    """
+    train_pu = pu[(pu["hour"] < train_end)
+                  & (~pu["zone_id"].isin(_EXCLUDED_ZONE_IDS))]
     totals = train_pu.groupby("zone_id")["pickup_count"].sum().sort_values(ascending=False)
     return totals.head(k).index.astype(int).tolist()
 
@@ -141,24 +151,36 @@ def _load_zone_meta() -> pd.DataFrame:
 
 
 def _select_test_hours(df: pd.DataFrame, n: int, seed: int) -> list[pd.Timestamp]:
-    """Pick n representative test hours spanning a full day cycle."""
+    """Pick n representative test hours that span a full day cycle.
+
+    Strategy: walk forward from the first test hour until we find a midnight,
+    then take the next 24 contiguous hours so the dispatch simulation covers
+    every hour-of-day exactly once. If the test window is too short, fall back
+    to the first n contiguous test hours, then to a uniform sample.
+    """
     test_hours = sorted(df.loc[df["split_id"] == 2, "hour"].unique())
     if not test_hours:
         return []
-    # one full day at evenly spaced indices
-    rng = np.random.default_rng(seed)
-    # prefer the first 24 contiguous hours after split start to keep dispatch
-    # simulation deterministic AND complete (covers full hour-of-day cycle)
+    in_set = {pd.Timestamp(h) for h in test_hours}
+
     if len(test_hours) >= n:
+        # find first midnight that has all n following hours inside the test set
         first = pd.Timestamp(test_hours[0])
-        start = first.floor("D")
-        candidate = [start + pd.Timedelta(hours=k) for k in range(n)]
-        # only keep candidates that exist in test_hours
-        in_set = {pd.Timestamp(h) for h in test_hours}
-        chosen = [c for c in candidate if c in in_set]
-        if len(chosen) >= n // 2:
-            return chosen[:n]
-        # fall back to random subset
+        last = pd.Timestamp(test_hours[-1])
+        # start from the FIRST full calendar day inside the test window
+        day = first.floor("D")
+        if day < first:
+            day = day + pd.Timedelta(days=1)
+        while day + pd.Timedelta(hours=n - 1) <= last:
+            candidate = [day + pd.Timedelta(hours=k) for k in range(n)]
+            if all(c in in_set for c in candidate):
+                return candidate
+            day = day + pd.Timedelta(days=1)
+        # second-best: first n contiguous hours starting at the test window's start
+        if pd.Timestamp(test_hours[n - 1]) == first + pd.Timedelta(hours=n - 1):
+            return [first + pd.Timedelta(hours=k) for k in range(n)]
+        # last resort: deterministic uniform sample
+        rng = np.random.default_rng(seed)
         idx = rng.choice(len(test_hours), size=n, replace=False)
         return [pd.Timestamp(test_hours[i]) for i in sorted(idx)]
     return [pd.Timestamp(h) for h in test_hours]
@@ -234,7 +256,7 @@ def main() -> int:
     out.to_csv(panel_noheader, index=False, header=False)
     panel_cols.write_text("\n".join(OUTPUT_COLS) + "\n", encoding="utf-8")
 
-    # zone meta
+    # zone meta — defensive fill so empty names never propagate downstream
     lookup = _load_zone_meta()
     if not lookup.empty:
         meta = (
@@ -245,7 +267,23 @@ def main() -> int:
             })
             .loc[lambda d: d["zone_id"].isin(top_zones)]
             [["zone_id", "zone_name", "borough"]]
+            .copy()
         )
+        # ensure every selected top zone is represented (lookup may be missing)
+        present = set(meta["zone_id"].astype(int).tolist())
+        missing_rows = [{"zone_id": z, "zone_name": f"Zone_{z}", "borough": "Unknown"}
+                        for z in top_zones if z not in present]
+        if missing_rows:
+            meta = pd.concat([meta, pd.DataFrame(missing_rows)], ignore_index=True)
+        # fill any NaN / empty cells
+        meta["zone_name"] = meta["zone_name"].fillna("").astype(str)
+        meta.loc[meta["zone_name"].str.strip() == "", "zone_name"] = (
+            "Zone_" + meta.loc[meta["zone_name"].str.strip() == "", "zone_id"].astype(str)
+        )
+        meta["borough"] = meta["borough"].fillna("Unknown").astype(str)
+        # remove commas to keep CSV clean
+        meta["zone_name"] = meta["zone_name"].str.replace(",", " ", regex=False)
+        meta["borough"]   = meta["borough"].str.replace(",", " ", regex=False)
     else:
         meta = pd.DataFrame({
             "zone_id": top_zones,

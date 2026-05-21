@@ -113,7 +113,7 @@ test_hours.csv             测试时段列表
 
 打开北太天元，定位到 `code/beita/`，执行：
 
-```matlab
+```
 run_all
 ```
 
@@ -132,7 +132,7 @@ run_all
 
 北太天元中：
 
-```matlab
+```
 cd tests
 test_lp_small_case
 test_no_deficit_case
@@ -180,9 +180,11 @@ s.t. $\sum_j x_{ij}\le S_i,\;\sum_i x_{ij}+u_j\ge D_j,\;x_{ij},u_j\ge0$.
 - LP 是连续 relaxation，$x_{ij}$ 解释为期望调度强度
 - 成本矩阵由历史 trip_distance 近似，未考虑实时路况
 
-## AI 使用声明
+## AI 工具使用声明
 
-见 [docs/ai_usage.md](docs/ai_usage.md)。
+按课程要求公开，见 [docs/ai_usage.md](docs/ai_usage.md)。
+本项目的数学建模、北太天元代码、清洗阈值、$\lambda$ 选择与实验解读均由三人讨论完成，
+AI 工具仅在部分模板与脚手架上做过辅助。
 
 ## 复现
 

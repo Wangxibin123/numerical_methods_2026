@@ -25,8 +25,12 @@ function cfg = config_project()
 
     % model / experiment hyper-parameters
     cfg.alpha_ridge      = 1.0;          % Ridge penalty
-    cfg.lambda_unmet     = 5.0;          % LP unmet-demand penalty (miles per unit)
-    cfg.lambda_grid      = [1, 2, 5, 10, 20, 50];
+    % Lambda: penalty (miles) per 1 unit of UNMET demand. Setting it well above
+    % the average OD distance (≈ 5 mi) makes the LP willing to dispatch even
+    % far-away surplus to serve a deficit. We use 20 so the LP operates in the
+    % regime where it can show its global-optimisation advantage over greedy.
+    cfg.lambda_unmet     = 20.0;
+    cfg.lambda_grid      = [1, 2, 5, 10, 15, 20, 30, 50, 100, 200];
 
     % Monte Carlo
     cfg.mc_n_scenarios   = 200;

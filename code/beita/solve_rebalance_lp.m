@@ -30,7 +30,7 @@ function result = solve_rebalance_lp(S, D, C, lambda_unmet)
         error('S and D must be same length');
     end
     if any(size(C) ~= [K, K])
-        error('cost matrix must be %dx%d', K, K);
+        error(sprintf('cost matrix must be %dx%d', K, K));
     end
 
     nx = K * K;            % x_ij entries

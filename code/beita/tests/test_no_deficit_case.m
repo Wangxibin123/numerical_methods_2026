@@ -1,5 +1,4 @@
 % TEST_NO_DEFICIT_CASE  D = [0; 0]  → LP should output X = 0, u = 0.
-clear; close all;
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..'));
 

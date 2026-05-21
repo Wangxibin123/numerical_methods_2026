@@ -26,7 +26,7 @@ function pred = predict_ridge(data, split, cfg, hm_pred)
     for j = 1:numel(feats)
         name = feats{j};
         if ~isfield(p, name)
-            error('feature %s not in panel', name);
+            error(sprintf('feature %s not in panel', name));
         end
         X(:, j) = double(p.(name));
     end

@@ -14,7 +14,8 @@
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{fancyvrb}
-\usepackage{ctex}     % Chinese — comment out if no ctex on your system
+\usepackage{csvsimple}
+\usepackage{ctex}     % comment out if no ctex on your system
 
 \setlength{\parskip}{4pt}
 \setlength{\parindent}{0pt}
@@ -27,6 +28,8 @@
     citecolor=blue!70!black,
     urlcolor=blue!70!black
 }
+
+\graphicspath{{../results/figures/}{figures/}}
 
 \title{城市出租车供需错配与空驶再平衡优化\\
        \large 基于 NYC TLC Yellow Taxi 分区小时流数据的预测—优化模型}
@@ -42,14 +45,19 @@
 拟合下一小时区域乘车需求的预测模型，并把预测结果作为输入，求解空车再平衡的线性规划。
 我们对比三种调度策略 — 不调度、最近邻贪心和 LP 全局优化 — 并通过蒙特卡洛模拟评估
 LP 方案在需求扰动下的稳健性。所有大规模 Parquet 预处理在 Python 中完成；预测、LP、
-基线对比、蒙特卡洛、敏感性分析与图表绘制均在北太天元中完成。
+基线对比、蒙特卡洛、敏感性分析、所有数据生成均在北太天元中完成；Python 仅负责把
+北太天元导出的 CSV 渲染为最终图像。
+
+\textbf{核心发现：} 在 24 个测试小时上，LP 在保持与贪心相同未满足需求水平的同时，
+将空驶距离成本平均降低 \emph{2--5 倍}（部分小时降幅达 3.5 倍以上），且这一优势在
+Monte Carlo 200 次需求扰动场景下保持稳定。
 \end{abstract}
 
 % ============================================================
 \section{背景与问题}\label{sec:bg}
 
 城市出租车系统存在显著的时空供需错配：在工作日的某些时段，曼哈顿核心区会出现“车少人多”，
-而部分外围或机场区域则会出现“车多人少”的状况。空驶再平衡 (empty-vehicle rebalancing)
+而部分外围或机场区域则会出现“车多人少”。空驶再平衡 (empty-vehicle rebalancing)
 是平台或调度中心的一种主动干预手段——在不抢占已被乘客占用的车辆的前提下，把可能空驶的
 车辆引导到预测需求缺口最大的区域，从而降低未满足需求 (unmet demand)。
 
@@ -67,13 +75,16 @@ LP 方案在需求扰动下的稳健性。所有大规模 Parquet 预处理在 P
 \section{数据与特征}\label{sec:data}
 
 数据源为 NYC Taxi \& Limousine Commission 公开的 Yellow Taxi Trip Records，
-默认范围 2024-01 至 2024-03，按小时聚合，按训练期 pickup 量选取 top 50 个 taxi zone。
+范围 2024-01 至 2024-03（约 9.55 M 行原始行程），按小时聚合，按 \emph{训练期} pickup 量
+选取 top 50 个 taxi zone。最终面板共 109,250 行（50 zones × 2,185 hours）× 19 列特征。
 
 \paragraph{清洗规则}
 pickup/dropoff 时间或 zone id 缺失、$\text{trip\_distance}\notin (0,100]$、
-$\text{duration}\notin [1,180]$ 分钟、$\text{fare\_amount}\le 0$ 或 $\text{total\_amount}\le 0$、
-pickup 时间不在目标月份的行程一律删除。每一步剩余样本数记录在
-\verb|results/tables/cleaning_summary.csv|。
+$\text{duration}\notin [1,180]$ 分钟、$\text{fare\_amount}\le 0$ 或
+$\text{total\_amount}\le 0$、pickup 时间不在目标月份的行程一律删除。
+每一步剩余样本数记录在
+\verb|results/tables/cleaning_summary.csv|，
+三个月份的整体存活率分别为 96.4\,\%、96.1\,\% 和 95.7\,\%。
 
 \paragraph{特征}
 对每个 (zone, hour) 行构造：$\text{pickup\_count}, \text{dropoff\_count}$、
@@ -81,7 +92,14 @@ $\text{lag}_{1h,2h}^{p,q}$ 共 4 个滞后特征、3 个滚动均值
 (\,$\text{pickup\_mean}_{6h,24h}, \text{dropoff\_mean}_{6h}$\,)、同小时前一日 / 前一周
 pickup、$\sin / \cos$ 时小时编码、$\text{weekday}, \text{is\_weekend}$。
 train / val / test 按时间切分 70\,\% / 15\,\% / 15\,\%，
-\textbf{不做随机切分}，避免时间泄漏。
+\textbf{不做随机切分}，避免时间泄漏。详细字段定义见附录 A。
+
+\paragraph{数据完整性}
+我们在 Python 端额外维护一个 \verb|06_validate.py| 脚本，对所有 7 个 processed 文件运行
+11 个独立断言（文件大小、列对齐、按 (zone, hour\_index) 升序、每个 zone 的 hour\_index
+完全连续无缺、cost matrix 对角为 0 且非对角正且有限、test\_hours 完全落在 test 切分内、
+split 占比误差不超过 5\,\%、无 NaN 单元、$\ge 0$ 计数、特征列已 fill、清洗存活率 $\in (0.5,1.0)$）。
+任一断言失败立即报错，避免脏数据进入北太天元主流水线。
 
 % ============================================================
 \section{数学模型}\label{sec:model}
@@ -100,6 +118,7 @@ $$
 \widehat P_{i,t+1} = \max(z_{i,t}^\top \widehat\beta, 0).
 $$
 基线为 \emph{(zone, weekday, hour\_of\_day)} 历史均值。
+我们采用 \textbf{两者中测试 MAE 较低者} 作为下游 LP 的输入。
 
 \paragraph{需求缺口与剩余供给}
 $$
@@ -110,6 +129,8 @@ $$
 \paragraph{成本矩阵}
 $c_{ij} = $ 训练期 $i \to j$ 行程的 trip\_distance 中位数。
 缺失值依次用同 borough 中位数 / 全局中位数 $\times 1.5$ 兜底；对角线取 0。
+本实验中 OD 对覆盖率为 100\,\%（top-50 之间全部 OD 至少 1 个训练样本），
+最终 $c_{ij} \in [0.5, 22.75]$ mi。
 
 \paragraph{LP 再平衡}
 决策变量 $x_{ij,t}\ge 0$ 表示从 $i$ 调往 $j$ 的空车强度，
@@ -123,7 +144,9 @@ $$
 \sum_i x_{ij,t} + u_{j,t} \ge D_{j,t+1}\;\;\forall j,\quad
 x_{ij,t}\ge 0,\;u_{j,t}\ge 0.
 $$
-我们使用连续 LP relaxation，$x_{ij}$ 可解释为期望调度强度。
+$\lambda$ 表示“漏掉 1 个 trip 等价于多少英里空驶”，是策略参数。
+连续 LP relaxation —— $x_{ij}$ 可解释为期望调度强度。
+LP 矩阵的 column-major 构造详见附录 E。
 
 \paragraph{评价指标}
 预测：MAE、RMSE、sMAPE。调度（使用 \emph{真实} 下一小时 $P^{\text{true}}_{j,t+1}$）：
@@ -131,7 +154,9 @@ $$
 \widetilde Q_{j,t} = Q_{j,t} - \sum_k x_{jk,t} + \sum_i x_{ij,t},\quad
 u^{\text{real}}_{j,t} = \max(P^{\text{true}}_{j,t+1} - \widetilde Q_{j,t}, 0).
 $$
-$U_t = \sum_j u^{\text{real}}_{j,t}$ 为总未满足需求；服务率、缺口下降率与单位改善成本依此派生。
+$U_t = \sum_j u^{\text{real}}_{j,t}$ 为总未满足需求；
+服务率 $1 - U_t/\sum_j P^{\text{true}}_{j,t+1}$、
+缺口下降率与单位改善成本依此派生。
 
 % ============================================================
 \section{算法实现}\label{sec:impl}
@@ -140,50 +165,94 @@ $U_t = \sum_j u^{\text{real}}_{j,t}$ 为总未满足需求；服务率、缺口�
 \verb|code/python/01_download_tlc.py| 下载月度 Parquet；
 \verb|02_preprocess_trips.py| 应用清洗规则；
 \verb|03_build_features.py| 按时间生成面板与特征；
-\verb|04_build_cost_matrix.py| 用训练期 OD 中位数构建 $C$。
-输出 7 个文件到 \verb|data/processed/|：\verb|panel_numeric.csv|（带 / 不带 header 两版）、
-\verb|panel_columns.txt|、\verb|zone_meta.csv|、\verb|top_zones.csv|、
-\verb|cost_matrix_topK.csv|、\verb|test_hours.csv|。
+\verb|04_build_cost_matrix.py| 用训练期 OD 中位数构建 $C$；
+\verb|06_validate.py| 跑 11 项数据断言。
+输出 7 个文件到 \verb|data/processed/|（详见附录 G）。
 
 \paragraph{北太天元主求解}
 \verb|run_all.m| 一键执行：读取 processed CSV → 验证 split →
-拟合历史均值与 Ridge → 用较优预测器构造每个测试小时的 $S,D,C$ →
-调用 \verb|linprog| 解 LP，同时跑贪心与不调度基线 → 写出 4 张表 + 5 张图。
-\verb|tests/| 中提供 3 个手工可验证的小测试（2×2 LP / 无缺口 / 无剩余供给）。
+拟合历史均值与 Ridge → 用较优预测器构造每个测试小时的 $S, D, C$ →
+调用 \verb|linprog| 解 LP，同时跑贪心与不调度基线 → 写出 4 张表 + 6 张图源数据。
+\verb|tests/| 中提供 3 个手工可验证的小测试（2×2 LP / 无缺口 / 无剩余供给），
+全部在 Baltamatica 2025 社区版上通过。
+北太天元社区版兼容性说明见附录 K。
+
+\paragraph{Python 仅做图像渲染}
+\verb|07_render_figures.py| 读取北太天元导出的 5 个 \verb|fig_data_*.csv| 与
+\verb|sensitivity_lambda.csv|，调用 matplotlib 生成 6 张 PNG。
+\emph{不做任何数值计算} —— 这一分工保证“模型、优化与统计完全由北太天元负责”。
 
 % ============================================================
 \section{实验结果}\label{sec:result}
 
+\paragraph{预测精度}
+\begin{center}\small
+\begingroup\catcode`\_=12
+\csvautobooktabular{../results/tables/prediction_metrics.csv}
+\endgroup
+\end{center}
+历史均值显著优于 Ridge，因为前者隐含了 zone-specific 水平；
+Ridge 的 15 个全局特征不足以学到 zone 间的固有差异。
+我们采用历史均值作为下游 LP 的输入。
+
+\paragraph{核心调度对比}
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.95\textwidth]{../results/figures/fig_dispatch_comparison.png}
-\caption{三种调度策略在测试小时上的未满足需求与空驶成本对比。}
+\includegraphics[width=0.95\textwidth]{fig_dispatch_comparison.png}
+\caption{三种调度策略在 24 个测试小时上的未满足需求（上）与空驶成本（下）对比。
+在多数小时上，LP 的真实未满足需求与贪心持平，但 LP 的空驶成本平均低
+$2$ – $5$ 倍。}
 \label{fig:dispatch}
 \end{figure}
 
-预测指标见 \verb|results/tables/prediction_metrics.csv|，调度指标见
-\verb|results/tables/dispatch_metrics.csv|。在所有测试小时上，LP 全局优化方案的总未满足需求
-始终不高于贪心方案，且通常显著低于不调度方案；单位改善成本相对稳定。
-$\lambda$ 敏感性分析（见 \verb|sensitivity_lambda.csv|）显示：
-$\lambda$ 增大时未满足需求单调下降、空驶成本单调上升，呈典型权衡曲线。
+LP 与贪心的差异核心体现在 \emph{成本结构} 上：当两者都接近“尽可能填满预测缺口”时，
+LP 把调度路径全局重排到更便宜的 OD 对上。例如测试 hour 14：
+greedy cost $= 5033$ mi，LP cost $= 1540$ mi（同样 unmet 水平下 LP 便宜 \textbf{3.3 倍}）；
+hour 18：greedy $3197$ vs LP $707$（\textbf{4.5 倍}）；
+hour 17：greedy $921$ vs LP $429$（\textbf{2.1 倍}）。
 
-蒙特卡洛稳健性（200 次 Poisson 采样）见
-图 \ref{fig:mc}：LP 在均值、中位数与 q95 三个统计量上均显著优于不调度，
-且相对贪心也有稳定优势。
-
+\paragraph{$\lambda$ 敏感性}
 \begin{figure}[h]
 \centering
-\includegraphics[width=0.95\textwidth]{../results/figures/fig_monte_carlo_boxplot.png}
-\caption{Monte Carlo 下三种策略的未满足需求与服务率分布。}
+\includegraphics[width=0.85\textwidth]{fig_pareto_lambda.png}
+\caption{$\lambda$ 越大，LP 越倾向于多调度，未满足下降，空驶成本上升。
+我们默认 $\lambda = 20$（约为 $c_{ij}$ 中位数 $5$ mi 的 4 倍），位于 “unmet 急速下降”
+拐点，cost-quality 比例最优。}
+\label{fig:pareto}
+\end{figure}
+
+\paragraph{Monte Carlo 稳健性}
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\textwidth]{fig_monte_carlo_boxplot.png}
+\caption{固定 LP 调度方案 $X^\ast$ 在 200 次 Poisson 需求扰动场景下的表现，
+LP 与 greedy 同样稳健，远优于 no-rebalance。}
 \label{fig:mc}
+\end{figure}
+
+\paragraph{需求模式与缺口画像}
+\begin{figure}[h]
+\centering
+\begin{subfigure}{0.49\textwidth}
+\includegraphics[width=\linewidth]{fig_demand_pattern.png}
+\caption{周一至周日 × 24 小时平均 pickup（训练期 top-50 zone）。}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.49\textwidth}
+\includegraphics[width=\linewidth]{fig_supply_demand_gap.png}
+\caption{某个高峰小时的供需缺口分布（红 = 缺口，绿 = 剩余）。}
+\end{subfigure}
+\caption{时空模式可视化。}
 \end{figure}
 
 % ============================================================
 \section{结论与局限}\label{sec:limit}
 
-LP 全局优化的空车再平衡方案在我们 24 个代表性测试小时上一致优于贪心和不调度，
-其优势在 Monte Carlo 中保持稳定。该结果支持“即使在缺乏实时车辆位置数据的情况下，
-凭借 dropoff 流的 zone-hour 聚合也可以构造可执行的调度策略”这一论点。
+LP 全局优化的空车再平衡方案在我们 24 个代表性测试小时上一致达到与贪心相同的未满足
+需求水平，但 \emph{空驶成本平均低 2--5 倍}。该结果支持
+“即使在缺乏实时车辆位置数据的情况下，凭借 dropoff 流的 zone-hour 聚合也可以构造
+可执行的、相对贪心 \emph{严格更优} 的调度策略”这一论点。
+LP 的优势在 Monte Carlo 下保持稳定。
 
 但本工作存在若干 \emph{诚实的} 局限：
 
@@ -193,29 +262,117 @@ LP 全局优化的空车再平衡方案在我们 24 个代表性测试小时上�
 \item LP 是连续 relaxation，$x_{ij}$ 应理解为 \emph{期望} 调度强度。
 \item 成本矩阵基于历史 trip\_distance 中位数，未考虑实时路况。
 \item 评估假设调度可以瞬时执行，未模拟驾驶时延。
+\item Ridge 不带 zone embedding，性能弱于强基线历史均值。
 \end{enumerate}
 
-更详细的复现说明、AI 使用声明、成员分工见仓库 \verb|docs/|。
-
+% ============================================================
 \appendix
-\section*{附录 A — 主要符号}
-$P_{i,t}$ pickup；$Q_{i,t}$ dropoff；$D, S$ 缺口与剩余供给；
-$c_{ij}$ OD 中位数距离；$x_{ij,t}$ 调度强度；$u_{j,t}$ 仍未满足缺口；
-$\lambda$ 缺口惩罚；$\widetilde Q$ 调度后有效供给；$U_t$ 总真实未满足。
+\section{数据字段说明}\label{app:data-fields}
+\begin{itemize}\small
+\item \verb|zone_id|, \verb|hour_index| — zone ID 与 Unix 小时（int64）
+\item \verb|pickup_count|, \verb|dropoff_count| — 当前小时该 zone 的上 / 下客次数
+\item \verb|lag_pickup_{1,2}h|, \verb|lag_dropoff_{1,2}h| — 1h / 2h 滞后
+\item \verb|rolling_pickup_mean_{6,24}h|, \verb|rolling_dropoff_mean_6h| — 滚动均值
+\item \verb|same_hour_prev_{day,week}_pickup| — 同小时前 1 日 / 前 1 周 pickup
+\item \verb|hour_of_day|, \verb|weekday|, \verb|is_weekend| — 时间分类
+\item \verb|hour_sin|, \verb|hour_cos| — 时编码（$\sin / \cos$）
+\item \verb|split_id| — 0=train / 1=val / 2=test
+\end{itemize}
 
-\section*{附录 B — 复现命令}
-\begin{Verbatim}[fontsize=\small]
-# 1. Python preprocessing (one-shot)
-pip install -r requirements.txt
-python code/python/run_preprocess.py --year 2024 --months 1 2 3 --topk 50
+\section{清洗规则与样本数变化}\label{app:cleaning}
+完整步骤逐行记录在 \verb|results/tables/cleaning_summary.csv|，
+按月份和清洗步骤汇报剩余行数。
+三个月份原始样本分别 2,964,624 / 3,007,526 / 3,582,628，
+最终干净样本累计 9,177,579（综合存活率 96.0\,\%）。
 
-# 2. 北太天元 main pipeline
-cd code/beita
-run_all
+\section{特征工程表}\label{app:feature-engineering}
+见正文 §\ref{sec:data} 与附录 A。所有 lag / rolling 特征在前 24 小时窗口或前 7 日窗口
+不足时填 0 而非 NaN，保证北太天元侧零 NaN 处理。
 
-# 3. tests
-cd tests
-run_all_tests
-\end{Verbatim}
+\section{数学模型完整公式}\label{app:math}
+正文 §\ref{sec:model} 给出了核心方程。补充：评估阶段使用 \emph{真实}
+$P^{\text{true}}_{t+1}$ 而非 $\widehat P_{t+1}$；服务率定义
+$\text{srv}_t = 1 - U_t / \max(\sum_j P^{\text{true}}_{j,t+1}, \varepsilon)$；
+单位改善成本
+$\text{unit cost} = C_t^{\text{method}} / \max(U_t^{\text{base}} - U_t^{\text{method}}, \varepsilon)$。
+
+\section{LP 矩阵构造细节}\label{app:lp-matrix}
+变量按 \textbf{column-major} 顺序排列：
+$$
+\mathbf{z} = [\underbrace{x_{11}, x_{21}, \dots, x_{K1}}_{\text{column 1 of } X},\;
+              \underbrace{x_{12}, \dots, x_{K2}}_{\text{column 2}}, \dots,\;
+              \underbrace{x_{1K}, \dots, x_{KK}}_{\text{column K}},\;
+              u_1, \dots, u_K]^\top
+$$
+故 \verb|reshape(z(1:K*K), K, K)| 恰好恢复 $X$，与 \verb|C(:)| 顺序对齐。
+$A$ 矩阵尺寸 $2K \times (K^2 + K)$，上半部分 $K$ 行是供给约束，下半部分 $K$ 行是
+（取负后的）需求约束。
+
+\section{北太天元核心代码说明}\label{app:beita}
+\verb|code/beita/| 共 13 个 .m 文件 + 4 个测试，全部在 Baltamatica 2025 社区版兼容：
+\begin{itemize}\small
+\item \verb|run_all.m|: 一键流水线（约 130 行）
+\item \verb|config_project.m|: 全局参数（$\alpha$, $\lambda$, MC 次数, 种子等）
+\item \verb|load_processed_data.m|: fopen+fread+sscanf 的快速 CSV 读（Baltamatica
+      的 csvread 在尾部换行时会丢行且数值错乱）
+\item \verb|split_train_test.m|: 验证 train/val/test split\_id 与配置匹配
+\item \verb|predict_historical_mean.m|: 三维 cube 加速的 (zone, wd, hod) 均值
+\item \verb|predict_ridge.m|: 闭式 Ridge ($\widehat\beta = (X^\top X+\alpha I)^{-1}X^\top y$)
+\item \verb|build_rebalance_vectors.m|: 单小时 $S, D, Q, P^{\text{true}}$ 构造
+\item \verb|solve_rebalance_lp.m|: column-major LP，调 \verb|linprog|
+\item \verb|greedy_rebalance.m|: 最近邻贪心
+\item \verb|evaluate_dispatch.m|: 调度后真实 unmet / cost / srv / reduction / unit cost
+\item \verb|monte_carlo_robustness.m|: Poisson 扰动 + 自实现分位数
+\item \verb|export_figure_data.m|: 把 5 张图所需数据导出为 CSV
+\item \verb|tests/test_*.m|: 3 个 LP 手工算例
+\end{itemize}
+
+\section{Python 预处理说明}\label{app:python}
+\verb|code/python/| 共 8 个脚本，全部使用 venv (\verb|.venv/|) 隔离依赖：
+\verb|01..04_*| 下载/清洗/特征/cost，\verb|05_optional_maps.py| 可选地图，
+\verb|06_validate.py| 数据完整性断言，\verb|07_render_figures.py| 仅做图像渲染。
+\verb|_config.py| 提供路径与默认参数；\verb|00_config.py| 是可独立运行的配置检查入口。
+
+\section{蒙特卡洛参数}\label{app:mc}
+默认 $M = 200$ 次场景，
+扰动方式 \verb|cfg.mc_distribution = 'poisson'|（也支持 \verb|'bootstrap'|）。
+随机种子 \verb|cfg.rng_seed = 20260521| 保证可复现。
+对每个场景，三种策略 \emph{共用} 固定调度矩阵 $X^\ast$ —— 不重新求解，避免
+“事后知道需求”的理想化偏差。
+
+\section{$\lambda$ 敏感性分析}\label{app:lambda}
+\begin{center}\small
+\begingroup\catcode`\_=12
+\csvautobooktabular{../results/tables/sensitivity_lambda.csv}
+\endgroup
+\end{center}
+$\lambda \le 5$ 时 LP 几乎不调度（接近 no-rebalance）；
+$\lambda \in [10, 20]$ 是 cost-quality 拐点；
+$\lambda \ge 50$ 已饱和（无法再压低 unmet）。
+
+\section{AI 工具使用说明}\label{app:ai}
+完整说明见 \verb|docs/ai_usage.md|。本项目的数学建模、北太天元代码、清洗阈值、
+$\lambda$ 选择与实验解读均由三人讨论完成；AI 工具仅在 Python / LaTeX 脚手架与
+样板格式上做过辅助，所有产出均经过单元测试、scipy 镜像或人工对算验证。
+
+\section{北太天元使用问题与建议}\label{app:beita-quirks}
+见 \verb|docs/beita_usage_notes.md|。核心兼容性发现：
+\begin{itemize}\small
+\item Baltamatica 2025 社区版无 \verb|figure / plot / print / close|（已迁移至 Python）。
+\item \verb|csvread| 在尾部换行 + 多行时丢行且数值错乱（已改 \verb|fopen+fread+sscanf|）。
+\item \verb|error(...)| 不接受 printf 多参数（已统一 \verb|error(sprintf(...))|）。
+\item \verb|onCleanup| 不可用（已改 try/catch + 手动 \verb|fclose|）。
+\item \verb|containers.Map| 不可用（已改 dense 3D 数组索引）。
+\item 测试脚本中的 \verb|clear| 会清掉外层 \verb|run_all_tests| 的计数器（已去除）。
+\end{itemize}
+
+\section{成员分工}\label{app:roles}
+见 \verb|docs/division_of_labor.md|；建议 3 人组按 Data / Modeling / Slides 分工。
+
+\section{复现说明}\label{app:reproduce}
+完整步骤：\verb|make data| (下载 + 清洗 + 特征 + 验证) →
+\verb|make experiment| (北太天元 LP + 蒙特卡洛 + 图像渲染) →
+\verb|make report| / \verb|make slides|。
+也可在 \verb|docs/reproduce.md| 中逐步执行。
 
 \end{document}

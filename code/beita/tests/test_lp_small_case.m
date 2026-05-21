@@ -21,7 +21,6 @@
 %
 % We test the LARGE-LAMBDA case (lambda = 1000): LP should use all surplus.
 
-clear; close all;
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..'));
 

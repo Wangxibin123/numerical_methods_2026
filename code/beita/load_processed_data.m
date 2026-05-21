@@ -9,126 +9,148 @@ function data = load_processed_data(cfg)
 %   data.zone_meta    struct with .zone_id .zone_name .borough (cellstrs)
 %   data.test_hours   M x 1 hour_index values to simulate dispatch on
 %
-% Uses readtable when available; falls back to csvread with no-header file.
+% Uses fopen + sscanf for numeric panels (Baltamatica csvread is unreliable on
+% delimited matrices; readtable works but is too slow for 100k-row panels).
 
     if ~exist(cfg.panel_cols_txt, 'file')
         error('missing panel_columns.txt; run python preprocessing first');
     end
     col_names = read_lines(cfg.panel_cols_txt);
     data.col_names = col_names;
+    n_cols = numel(col_names);
 
     % ---------- panel ----------
-    panel_mat = try_read_panel(cfg);
-    if size(panel_mat, 2) ~= numel(col_names)
-        error('panel column count mismatch: file has %d, columns.txt %d', ...
-              size(panel_mat, 2), numel(col_names));
+    panel_mat = read_numeric_csv(cfg.panel_csv_noheader, n_cols);
+    if size(panel_mat, 2) ~= n_cols
+        error(sprintf('panel column count mismatch: file has %d, columns.txt %d', ...
+              size(panel_mat, 2), n_cols));
     end
     panel = struct();
-    for k = 1:numel(col_names)
+    for k = 1:n_cols
         panel.(col_names{k}) = panel_mat(:, k);
     end
     data.panel = panel;
 
-    % ---------- top zones ----------
-    tz = try_csvread_skip_header(cfg.top_zones_csv);
-    data.top_zones = int32(tz(:, 1));
-
-    % ---------- cost matrix ----------
-    if ~exist(cfg.cost_matrix_csv, 'file')
-        error('missing cost matrix: %s', cfg.cost_matrix_csv);
-    end
-    data.cost_matrix = csvread(cfg.cost_matrix_csv);
+    % ---------- top zones (skip 1-line header) ----------
+    tz_mat = read_numeric_csv(cfg.top_zones_csv, 1, 1);
+    data.top_zones = int32(tz_mat(:, 1));
     K = numel(data.top_zones);
+
+    % ---------- cost matrix (no header, K x K) ----------
+    if ~exist(cfg.cost_matrix_csv, 'file')
+        error(sprintf('missing cost matrix: %s', cfg.cost_matrix_csv));
+    end
+    data.cost_matrix = read_numeric_csv(cfg.cost_matrix_csv, K);
     if any(size(data.cost_matrix) ~= [K, K])
-        error('cost matrix shape %dx%d, expected %dx%d', ...
-              size(data.cost_matrix, 1), size(data.cost_matrix, 2), K, K);
+        error(sprintf('cost matrix shape %dx%d, expected %dx%d', ...
+              size(data.cost_matrix, 1), size(data.cost_matrix, 2), K, K));
     end
 
-    % ---------- zone meta ----------
+    % ---------- zone meta (has text columns; use readtable) ----------
     data.zone_meta = read_zone_meta(cfg.zone_meta_csv, data.top_zones);
 
-    % ---------- test hours ----------
-    th = try_csvread_skip_header(cfg.test_hours_csv);
-    % file has columns hour_iso, hour_index → hour_index is column 2 (or 1 if iso dropped)
-    if size(th, 2) >= 2
-        data.test_hours = int64(th(:, end));   % last column is hour_index
-    else
-        data.test_hours = int64(th(:, 1));
-    end
+    % ---------- test hours (skip 1-line header; last col is hour_index) ----------
+    th_mat = read_test_hours(cfg.test_hours_csv);
+    data.test_hours = int64(th_mat(:, end));
 
     fprintf('[load] panel rows=%d cols=%d  K=%d  test_hours=%d\n', ...
             size(panel_mat, 1), size(panel_mat, 2), K, numel(data.test_hours));
 end
 
 
-function panel_mat = try_read_panel(cfg)
-% Prefer csvread on the noheader file (works everywhere); fall back to readtable.
-    if exist(cfg.panel_csv_noheader, 'file')
-        panel_mat = csvread(cfg.panel_csv_noheader);
-        return;
-    end
-    if exist(cfg.panel_csv, 'file')
-        try
-            T = readtable(cfg.panel_csv);
-            panel_mat = table2array(T);
-            return;
-        catch
-            % manual parse: skip first line, read rest
-            panel_mat = csvread(cfg.panel_csv, 1, 0);
-            return;
-        end
-    end
-    error('no panel csv found in %s', cfg.processed_dir);
-end
-
-
 function lines = read_lines(path)
     fid = fopen(path, 'r');
     if fid < 0
-        error('cannot open %s', path);
+        error(sprintf('cannot open %s', path));
     end
-    cleanup = onCleanup(@() fclose(fid));
     lines = {};
-    while true
-        ln = fgetl(fid);
-        if ~ischar(ln); break; end
-        ln = strtrim(ln);
-        if isempty(ln); continue; end
-        lines{end+1, 1} = ln; %#ok<AGROW>
+    try
+        while true
+            ln = fgetl(fid);
+            if ~ischar(ln); break; end
+            ln = strtrim(ln);
+            if isempty(ln); continue; end
+            lines{end+1, 1} = ln; %#ok<AGROW>
+        end
+        fclose(fid);
+    catch err
+        fclose(fid);
+        rethrow(err);
     end
 end
 
 
-function M = try_csvread_skip_header(path)
-% Read CSV that may have header line. csvread refuses non-numeric, so we
-% first try plain csvread, then csvread skipping line 0.
-    try
-        M = csvread(path);
+function M = read_numeric_csv(path, n_cols, skip_lines)
+% Fast generic CSV reader: fopen → fread → sscanf.
+% Works for noheader files; pass skip_lines=1 to skip a header line.
+    if nargin < 3
+        skip_lines = 0;
+    end
+    if ~exist(path, 'file')
+        error(sprintf('missing %s', path));
+    end
+    fid = fopen(path, 'r');
+    if fid < 0
+        error(sprintf('cannot open %s', path));
+    end
+    % skip header lines if requested
+    for i = 1:skip_lines
+        fgetl(fid);
+    end
+    % slurp rest as char
+    buf = fread(fid, '*char')';
+    fclose(fid);
+    % replace commas with spaces so sscanf treats them as whitespace
+    buf = strrep(buf, ',', ' ');
+    nums = sscanf(buf, '%f');
+    if isempty(nums)
+        M = zeros(0, n_cols);
         return;
-    catch
-        try
-            M = csvread(path, 1, 0);
-            return;
-        catch
-            % fall back to readtable
-            T = readtable(path);
-            M = [];
-            for c = 1:width(T)
-                col = T{:, c};
-                if iscell(col)
-                    % try to parse iso strings — keep NaN if not numeric
-                    n = numel(col);
-                    nums = nan(n, 1);
-                    for ii = 1:n
-                        v = str2double(col{ii});
-                        if ~isnan(v); nums(ii) = v; end
-                    end
-                    M = [M, nums]; %#ok<AGROW>
-                else
-                    M = [M, double(col)]; %#ok<AGROW>
-                end
+    end
+    n_total = numel(nums);
+    if mod(n_total, n_cols) ~= 0
+        error(sprintf('parse error: %d numbers cannot reshape to N x %d', ...
+            n_total, n_cols));
+    end
+    M = reshape(nums, n_cols, [])';
+end
+
+
+function th = read_test_hours(path)
+% test_hours.csv has columns: hour_iso, hour_index
+% hour_iso is a string with no commas inside. We use a custom parse that
+% takes only the LAST comma-separated field per line as numeric.
+    fid = fopen(path, 'r');
+    if fid < 0
+        error(sprintf('cannot open %s', path));
+    end
+    rows = {};
+    try
+        % skip header
+        hdr = fgetl(fid); %#ok<NASGU>
+        while true
+            ln = fgetl(fid);
+            if ~ischar(ln); break; end
+            ln = strtrim(ln);
+            if isempty(ln); continue; end
+            ix = strfind(ln, ',');
+            if isempty(ix)
+                v = str2double(ln);
+            else
+                v = str2double(ln(ix(end)+1:end));
+            end
+            if ~isnan(v)
+                rows{end+1, 1} = v; %#ok<AGROW>
             end
         end
+        fclose(fid);
+    catch err
+        fclose(fid);
+        rethrow(err);
+    end
+    th = zeros(numel(rows), 1);
+    for k = 1:numel(rows)
+        th(k) = rows{k};
     end
 end
 
@@ -137,48 +159,55 @@ function meta = read_zone_meta(path, top_zones)
     meta.zone_id   = top_zones;
     meta.zone_name = cell(numel(top_zones), 1);
     meta.borough   = cell(numel(top_zones), 1);
+    for k = 1:numel(top_zones)
+        meta.zone_name{k} = sprintf('Zone_%d', top_zones(k));
+        meta.borough{k}   = 'Unknown';
+    end
     if ~exist(path, 'file')
-        for k = 1:numel(top_zones)
-            meta.zone_name{k} = sprintf('Zone_%d', top_zones(k));
-            meta.borough{k}   = 'Unknown';
-        end
+        return;
+    end
+
+    % zone_meta.csv has columns: zone_id, zone_name, borough — strings inside
+    % Parse manually so we don't depend on readtable's text handling.
+    fid = fopen(path, 'r');
+    if fid < 0
         return;
     end
     try
-        T = readtable(path);
-    catch
-        % stub fallback
-        for k = 1:numel(top_zones)
-            meta.zone_name{k} = sprintf('Zone_%d', top_zones(k));
-            meta.borough{k}   = 'Unknown';
+        hdr = fgetl(fid); %#ok<NASGU>
+        while true
+            ln = fgetl(fid);
+            if ~ischar(ln); break; end
+            ln = strtrim(ln);
+            if isempty(ln); continue; end
+            parts = split_csv_line(ln);
+            if numel(parts) < 1; continue; end
+            zid = str2double(parts{1});
+            if isnan(zid); continue; end
+            idx = find(double(top_zones) == zid, 1, 'first');
+            if isempty(idx); continue; end
+            if numel(parts) >= 2; meta.zone_name{idx} = parts{2}; end
+            if numel(parts) >= 3; meta.borough{idx}   = parts{3}; end
         end
-        return;
+        fclose(fid);
+    catch err
+        fclose(fid);
+        rethrow(err);
     end
-    has_id   = ismember('zone_id',   T.Properties.VariableNames);
-    has_name = ismember('zone_name', T.Properties.VariableNames);
-    has_bor  = ismember('borough',   T.Properties.VariableNames);
-    if ~has_id
-        return;
-    end
-    ids = double(T.zone_id);
-    for k = 1:numel(top_zones)
-        idx = find(ids == double(top_zones(k)), 1, 'first');
-        if isempty(idx)
-            meta.zone_name{k} = sprintf('Zone_%d', top_zones(k));
-            meta.borough{k}   = 'Unknown';
-        else
-            if has_name
-                v = T.zone_name(idx);
-                if iscell(v); meta.zone_name{k} = v{1}; else; meta.zone_name{k} = char(v); end
-            else
-                meta.zone_name{k} = sprintf('Zone_%d', top_zones(k));
-            end
-            if has_bor
-                v = T.borough(idx);
-                if iscell(v); meta.borough{k} = v{1}; else; meta.borough{k} = char(v); end
-            else
-                meta.borough{k} = 'Unknown';
-            end
+end
+
+
+function parts = split_csv_line(ln)
+% naive comma split — our CSV writer ensures no commas inside text fields
+    parts = {};
+    rest = ln;
+    while true
+        ix = strfind(rest, ',');
+        if isempty(ix)
+            parts{end+1} = rest; %#ok<AGROW>
+            break;
         end
+        parts{end+1} = rest(1:ix(1)-1); %#ok<AGROW>
+        rest = rest(ix(1)+1:end);
     end
 end

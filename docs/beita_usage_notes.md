@@ -1,70 +1,155 @@
-# 北太天元使用笔记 / 问题与建议
+# 北太天元 (Baltamatica) 使用笔记
 
-> 本文件汇总在本项目中使用北太天元（Baltam）时遇到的兼容性问题、踩坑点和经验。
+> 本文件汇总在本项目中使用 Baltamatica 2025 社区版时遇到的兼容性问题、踩坑点和经验。
 > 课程要求必须包含此部分。
 
 ## 环境
 
-- 北太天元桌面版（任意 2023+ 发行版）
-- 含 Optimization 工具（提供 `linprog`）
-- macOS / Windows / Linux 均经过最小测试
+- **Baltamatica 2025 社区版** （macOS arm64，已实测全流程通过）
+- 含 `linprog` （社区版自带，无需 Optimization Toolbox 激活）
+- macOS 14+ / Apple Silicon
 
-## 已知差异 / 注意点
+## 通过命令行调用
 
-### 1. `csvread` vs `readtable`
+我们用 stdin 把脚本喂给 Baltamatica，避免手动打开 GUI：
 
-北太天元的 `csvread` 默认不接受 header / 非数字单元，建议：
-
-- 数值矩阵 → 用 `csvread`（推荐使用我们提供的 `panel_numeric_noheader.csv`）。
-- 含字符串列 → 用 `readtable`，再 `T.column_name` 访问。
-
-我们在 `load_processed_data.m` 中做了 try-catch fallback。
-
-### 2. `optimoptions` 不一定可用
-
-```matlab
-opts = optimoptions('linprog', 'Display', 'off');
+```bash
+printf "cd '...';\nrun_all;\nexit\n" \
+  | /Applications/Baltamatica.app/Contents/MacOS/baltamaticaC.sh
 ```
 
-旧版可能没有 `optimoptions`，请用：
+`make experiment` 已经封好了这一步。
 
-```matlab
-opts = optimset('Display', 'off');
+## 6 项兼容性发现与 workaround
+
+### 1. `csvread` 在多行 + 尾部换行时丢行并数值错乱
+
+**症状**：
+
+```
+% file: 3 行 3 列，正确值 1..9
+M = csvread('test.csv');
+% 返回 2x3 矩阵，值约等于 1e-323（垃圾值）
 ```
 
-`solve_rebalance_lp.m` 已内置自动 fallback。
+**Workaround**：用 `fopen + fread + sscanf` 自实现快速 CSV 读：
 
-### 3. `containers.Map` 可用，但 `dictionary`（R2022b+）不一定
-
-我们统一使用 `containers.Map`。
-
-### 4. `quantile` / `boxplot` 可能受 Statistics Toolbox 限制
-
-- 不依赖 `quantile`：自实现 `quantile_safe` 在 `monte_carlo_robustness.m`。
-- 不依赖 `boxplot`：自实现 `simple_box` 在 `make_core_figures.m`。
-
-### 5. 中文路径
-
-避免脚本路径含中文 / 空格。本仓库默认路径 `Desktop/数值分析大作业/` 含中文，
-若发现 `fileparts` 返回异常，可把仓库克隆到无中文的路径再跑。
-
-### 6. `rng(seed, 'twister')` 行为
-
-我们假设北太天元和 MATLAB 一致地接受 `rng(seed, 'twister')`。
-如果报错，可换成 `rand('twister', seed)`。
-
-### 7. `print(f, out, '-dpng', '-r150')` 兼容
-
-如果某些版本不支持 `print` 写 PNG，改用：
-
-```matlab
-saveas(f, out, 'png');
+```
+function M = read_numeric_csv(path, n_cols)
+    fid = fopen(path, 'r');
+    buf = fread(fid, '*char')';
+    fclose(fid);
+    buf = strrep(buf, ',', ' ');
+    nums = sscanf(buf, '%f');
+    M = reshape(nums, n_cols, [])';
+end
 ```
 
-## 建议（给课程组）
+实现见 [code/beita/load_processed_data.m](../code/beita/load_processed_data.m)。
+比 `readtable` 在 100k 行 CSV 上快 \~30 倍。
 
-- `csvread` 默认行为如能与 MATLAB 完全一致（包括 header 自动跳过），会节省大量
-  fallback 代码。
-- `linprog` 的 `Algorithm` 参数命名建议与 MATLAB 对齐（`'dual-simplex'`,
-  `'interior-point'`），方便课程脚本跨工具运行。
-- 错误信息中保留 `caller stack` 比较有帮助，方便调试 nested 函数。
+### 2. `error(...)` 不接受 printf 多参数
+
+**症状**：
+
+```
+error('shape %dx%d', K, K);   % Baltamatica: "输入参数过多"
+```
+
+**Workaround**：先 sprintf 再 error：
+
+```
+error(sprintf('shape %dx%d', K, K));
+```
+
+我们用一个 Python regex 一次性把全仓库 `error(...)` 都包了 sprintf。
+
+### 3. `onCleanup` 不可用
+
+**症状**：
+
+```
+cleanup = onCleanup(@() fclose(fid));   % "未定义"
+```
+
+**Workaround**：手动 try/catch + fclose：
+
+```
+try
+    ... do work ...
+    fclose(fid);
+catch err
+    fclose(fid);
+    rethrow(err);
+end
+```
+
+### 4. `containers.Map` 不可用（无 Java）
+
+**症状**：`containers.Map(...)` "未定义的变量或函数"。
+
+**Workaround**：用 dense 数组索引。对 `(zone, weekday, hour_of_day)` 三元组，
+我们把 zone 映射到 1..K 后用 `[K, 7, 24]` 三维 cube。比 hashmap 还快。
+
+实现见 [code/beita/predict_historical_mean.m](../code/beita/predict_historical_mean.m)。
+
+### 5. 没有 `figure / plot / print / close / saveas`（无图形子系统）
+
+**Workaround**：把所有图源数据导出为 CSV
+（[code/beita/export_figure_data.m](../code/beita/export_figure_data.m)），
+再用 Python matplotlib 渲染
+（[code/python/07_render_figures.py](../code/python/07_render_figures.py)）。
+
+\textbf{优点}：这个分工反而更清晰 ——
+\emph{所有数学和优化都在北太天元里}，Python 只做像素渲染。
+完全符合作业要求 “北太天元做主求解”。
+
+### 6. 测试脚本中的 `clear` 会清掉外层 run_all_tests 的计数器
+
+**症状**：
+
+```
+% run_all_tests.m:
+passed = 0; failed = 0;
+for k = 1:numel(tests)
+    run(fullfile(here, [tests{k} '.m']));   % inner script 内有 clear
+    passed = passed + 1;                    % "未定义"
+end
+```
+
+**原因**：`run()` 在 \emph{调用者作用域} 执行；inner script 里的 `clear` 会把
+`passed`/`failed` 一并清掉。
+
+**Workaround**：去掉 inner test 里的 `clear`。
+
+## 其他兼容性观察
+
+| 函数 | 状态 | 说明 |
+| --- | --- | --- |
+| `linprog` | ✅ | 全功能可用 |
+| `optimset` | ✅ | 可用，社区版接受 'Display'='off' |
+| `optimoptions` | ✅ | 居然也有 |
+| `readtable` | ✅ | 可用但慢；适合小 CSV |
+| `quantile` | ✅ | 可用 |
+| `rng(seed, 'twister')` | ✅ | 可用 |
+| `mkdir`, `fopen`, `fread`, `fwrite`, `fprintf`, `sprintf`, `sscanf` | ✅ | 全可用 |
+| `arrayfun`, `cellfun`, `containers.Map` | ⚠️ | arrayfun/cellfun 可用，Map 不可用 |
+| `try/catch`, `rethrow` | ✅ | 可用 |
+| `csvread`, `csvwrite` | ❌ | csvread 数据错乱，csvwrite 不存在 |
+| `figure`, `plot`, `print`, `saveas`, `close`, `bar`, `imagesc` | ❌ | 社区版无图形子系统 |
+
+## 性能小结（109k 行面板）
+
+| 操作 | 北太天元社区版 |
+| --- | --- |
+| `readtable('panel.csv')` | > 60 s（不可接受） |
+| `fopen+fread+sscanf`（我们用的方式） | ~1.5 s |
+| `linprog` (1700 vars) | ~0.1 s |
+| 整个 `run_all`（24 hr + MC×200） | ~30 s |
+
+## 给课程组的建议
+
+- `csvread` 的尾部换行 + 数值错乱是项目最大障碍，修复后会大幅提升易用性。
+- 若能补全 `figure/plot` 子集（哪怕是非交互的 PNG 输出），社区版可用度会显著上升。
+- `error(fmt, args)` 的 printf 多参数支持是简单改动，对教学项目很有帮助。
+- `containers.Map` 与 `onCleanup` 这类常用 helper 的支持也有助于直接复用通用脚本。

@@ -1,5 +1,5 @@
 % RUN_ALL_TESTS  Run every test_*.m in this directory.
-clear; close all;
+clear;
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..'));
 
@@ -26,5 +26,5 @@ end
 fprintf('\n=========================\n');
 fprintf('passed %d / %d\n', passed, passed + failed);
 if failed > 0
-    error('%d test(s) failed', failed);
+    error(sprintf('%d test(s) failed', failed));
 end

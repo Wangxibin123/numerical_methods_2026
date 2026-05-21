@@ -13,7 +13,7 @@ function X = greedy_rebalance(S, D, C)
         error('S and D must be same length');
     end
     if any(size(C) ~= [K, K])
-        error('cost matrix must be %dx%d', K, K);
+        error(sprintf('cost matrix must be %dx%d', K, K));
     end
 
     X = zeros(K, K);

@@ -8,9 +8,9 @@
 %   6. write dispatch_metrics.csv
 %   7. lambda sensitivity sweep
 %   8. Monte Carlo robustness on last test hour
-%   9. core figures
+%   9. export figure-source CSVs (Python renders the PNGs)
 
-clear; close all; clc;
+clear;
 
 here = fileparts(mfilename('fullpath'));
 addpath(here);
@@ -32,7 +32,8 @@ fprintf('historical_mean test: MAE=%.3f RMSE=%.3f sMAPE=%.4f\n', mae_h, rmse_h, 
 
 fprintf('\n-- predictor 2: ridge regression --\n');
 rg = predict_ridge(data, split, cfg, hm);
-[mae_r, rmse_r, smape_r] = pred_metrics(rg.full, rg.true_y, split.test_mask & rg.has_next);
+% ridge shares the same target as hm (same next-hour pickup)
+[mae_r, rmse_r, smape_r] = pred_metrics(rg.full, hm.true_y, split.test_mask & hm.has_next);
 fprintf('ridge           test: MAE=%.3f RMSE=%.3f sMAPE=%.4f (alpha=%.2f)\n', ...
         mae_r, rmse_r, smape_r, cfg.alpha_ridge);
 
@@ -155,11 +156,12 @@ end
 fclose(mcfh);
 fprintf('written monte_carlo_metrics.csv\n');
 
-% ---------- 9. figures ----------
-fprintf('\n-- figures --\n');
-make_core_figures(data, dispatch_log, mc, cfg);
+% ---------- 9. figure data export ----------
+fprintf('\n-- figure data export --\n');
+export_figure_data(data, dispatch_log, mc, cfg);
 
 fprintf('\n== run_all done ==\n');
+fprintf('Run `python code/python/07_render_figures.py` to rasterise PNGs.\n');
 
 
 % =====================================================================

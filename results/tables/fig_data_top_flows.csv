@@ -1,0 +1,21 @@
+rank,src_pos,dst_pos,src_zone_id,dst_zone_id,src_name,dst_name,total_units
+1,12,4,170,132,Murray Hill,JFK Airport,778.444444
+2,31,10,262,138,Yorkville East,LaGuardia Airport,553.555556
+3,34,4,233,132,UN/Turtle Bay South,JFK Airport,517.777778
+4,41,10,75,138,East Harlem South,LaGuardia Airport,430.888889
+5,35,4,137,132,Kips Bay,JFK Airport,292.444444
+6,15,1,48,161,Clinton East,Midtown Center,260.888889
+7,1,3,161,236,Midtown Center,Upper East Side North,204.777778
+8,1,2,161,237,Midtown Center,Upper East Side South,186.333333
+9,8,1,142,161,Lincoln Square East,Midtown Center,181.777778
+10,16,5,141,162,Lenox Hill West,Midtown East,175.777778
+11,11,9,163,239,Midtown North,Upper West Side South,175.000000
+12,42,6,50,230,Clinton West,Times Sq/Theatre District,156.888889
+13,19,7,164,186,Midtown South,Penn Station/Madison Sq West,153.111111
+14,6,21,230,238,Times Sq/Theatre District,Upper West Side North,149.333333
+15,24,1,229,161,Sutton Place/Turtle Bay North,Midtown Center,149.333333
+16,22,4,107,132,Gramercy,JFK Airport,141.111111
+17,23,48,263,70,Yorkville West,East Elmhurst,129.333333
+18,33,11,143,163,Lincoln Square West,Midtown North,126.333333
+19,45,10,166,138,Morningside Heights,LaGuardia Airport,118.000000
+20,20,31,140,262,Lenox Hill East,Yorkville East,117.777778

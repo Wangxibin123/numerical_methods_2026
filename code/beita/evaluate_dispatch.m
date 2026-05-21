@@ -25,7 +25,7 @@ function ev = evaluate_dispatch(Q_current, P_true_next, X, C, baseline_unmet)
         error('Q_current and P_true_next must be same length');
     end
     if any(size(X) ~= [K, K])
-        error('X must be %dx%d', K, K);
+        error(sprintf('X must be %dx%d', K, K));
     end
 
     outflow = sum(X, 2);

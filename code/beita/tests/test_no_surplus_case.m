@@ -1,5 +1,4 @@
 % TEST_NO_SURPLUS_CASE  S = [0; 0]  → LP should output X = 0, u = D.
-clear; close all;
 here = fileparts(mfilename('fullpath'));
 addpath(fullfile(here, '..'));
 
