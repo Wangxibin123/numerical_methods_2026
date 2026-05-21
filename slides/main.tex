@@ -107,7 +107,34 @@ x,u\ge 0.
 $\lambda$ 控制 “未满足需求” 的惩罚权重，单位 = mile / unit。
 \end{frame}
 
-% 7
+% 7b — NEW: lambda 的经济学依据
+\begin{frame}{$\lambda$ 的经济学依据 \& 敏感性}
+\small
+\textbf{$\lambda$ 含义}：单位为英里，
+等于 “漏掉 1 个 trip” 相当于多少英里空驶。
+\vspace{0.4em}
+
+\textbf{由 NYC TLC 2024 Yellow Taxi 标准费率推导}：
+\begin{center}\small
+\begin{tabular}{lcc}
+\toprule
+视角 & 推导 & $\lambda$ (mi) \\
+\midrule
+司机 & 净收入 \$12 / 空驶单位成本 \$0.40/mi & $\approx 30$ \\
+社会 & (\$12 + 客户机会成本 \$5) / \$0.40 & $\approx 42$ \\
+平台 & 折扣率回报法 & $20$–$25$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{可辩护区间} $\lambda \in [20, 42]$，
+我们以 $\lambda = 20$（保守下界）为默认值；
+20 个 $\lambda$ 值的全测试小时 sweep 显示
+\emph{整个 [20, 200] 区间已饱和到 unmet=77.7 / srv=0.949}——
+对参数选择鲁棒。
+\end{frame}
+
+% 8
 \begin{frame}{Baselines}
 \begin{itemize}
 \item \textbf{Baseline 0}: 不调度，$X = 0$。

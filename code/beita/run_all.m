@@ -112,26 +112,48 @@ end
 fclose(dm);
 fprintf('written dispatch_metrics.csv\n');
 
-% ---------- 7. lambda sensitivity ----------
-fprintf('\n-- lambda sensitivity --\n');
+% ---------- 7. lambda sensitivity (aggregated over ALL 24 test hours) ----
+fprintf('\n-- lambda sensitivity (mean over %d test hours) --\n', n_hours);
 sweep = fopen(fullfile(cfg.tables_dir, 'sensitivity_lambda.csv'), 'w');
-fprintf(sweep, 'lambda,total_unmet,empty_cost,service_rate\n');
-hi_last = data.test_hours(end);
-vec_last = build_rebalance_vectors(data, hi_last, predictor_full);
-ev_no_last = evaluate_dispatch(vec_last.Q_current, vec_last.P_true_next, ...
-                               zeros(size(C)), C, []);
+fprintf(sweep, ['lambda,mean_unmet,mean_cost,mean_service_rate,' ...
+                'sum_unmet,sum_cost,greedy_mean_unmet,greedy_mean_cost\n']);
+
+% pre-cache greedy mean across hours for the same-row comparison
+greedy_unmet_acc = 0; greedy_cost_acc = 0;
+no_unmet_acc = 0;
+for h = 1:n_hours
+    greedy_unmet_acc = greedy_unmet_acc + dispatch_log(h).ev_greedy.total_unmet;
+    greedy_cost_acc  = greedy_cost_acc  + dispatch_log(h).ev_greedy.empty_cost;
+    no_unmet_acc     = no_unmet_acc     + dispatch_log(h).ev_no.total_unmet;
+end
+greedy_mean_unmet = greedy_unmet_acc / n_hours;
+greedy_mean_cost  = greedy_cost_acc  / n_hours;
+
 for li = 1:numel(cfg.lambda_grid)
     lam = cfg.lambda_grid(li);
-    lp = solve_rebalance_lp(vec_last.S, vec_last.D, C, lam);
-    evl = evaluate_dispatch(vec_last.Q_current, vec_last.P_true_next, lp.X, C, ...
-                            ev_no_last.total_unmet);
-    fprintf(sweep, '%.6f,%.6f,%.6f,%.6f\n', lam, ...
-            evl.total_unmet, evl.empty_cost, evl.service_rate);
-    fprintf('  lambda=%6.2f → unmet=%6.1f cost=%6.1f service=%.4f\n', ...
-            lam, evl.total_unmet, evl.empty_cost, evl.service_rate);
+    sum_unmet = 0; sum_cost = 0; sum_srv = 0;
+    for h = 1:n_hours
+        hi = data.test_hours(h);
+        vec_h = build_rebalance_vectors(data, hi, predictor_full);
+        lp_h  = solve_rebalance_lp(vec_h.S, vec_h.D, C, lam);
+        ev_h  = evaluate_dispatch(vec_h.Q_current, vec_h.P_true_next, lp_h.X, C, []);
+        sum_unmet = sum_unmet + ev_h.total_unmet;
+        sum_cost  = sum_cost  + ev_h.empty_cost;
+        sum_srv   = sum_srv   + ev_h.service_rate;
+    end
+    mean_unmet = sum_unmet / n_hours;
+    mean_cost  = sum_cost  / n_hours;
+    mean_srv   = sum_srv   / n_hours;
+    fprintf(sweep, '%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n', ...
+            lam, mean_unmet, mean_cost, mean_srv, ...
+            sum_unmet, sum_cost, greedy_mean_unmet, greedy_mean_cost);
+    fprintf('  lambda=%6.2f → mean unmet=%7.1f mean cost=%7.1f srv=%.4f\n', ...
+            lam, mean_unmet, mean_cost, mean_srv);
 end
 fclose(sweep);
 fprintf('written sensitivity_lambda.csv\n');
+fprintf('  greedy mean over hours: unmet=%.1f cost=%.1f\n', ...
+        greedy_mean_unmet, greedy_mean_cost);
 
 % ---------- 8. Monte Carlo on last test hour ----------
 fprintf('\n-- Monte Carlo robustness --\n');

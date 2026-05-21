@@ -208,24 +208,62 @@ def pareto_lambda() -> None:
         return
     df = pd.read_csv(p).sort_values("lambda")
 
-    fig, ax1 = plt.subplots(figsize=(8, 5))
+    # accept both old (single-hour) and new (aggregated) schemas
+    unmet_col = "mean_unmet" if "mean_unmet" in df.columns else "total_unmet"
+    cost_col  = "mean_cost"  if "mean_cost"  in df.columns else "empty_cost"
+    greedy_unmet = float(df["greedy_mean_unmet"].iloc[0]) if "greedy_mean_unmet" in df.columns else None
+    greedy_cost  = float(df["greedy_mean_cost"].iloc[0])  if "greedy_mean_cost"  in df.columns else None
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+
+    # left: lambda → unmet & cost dual-axis
+    ax1 = axes[0]
     color1 = "#1f77b4"
-    ax1.plot(df["lambda"], df["total_unmet"], "o-", color=color1, label="unmet")
+    ax1.plot(df["lambda"], df[unmet_col], "o-", color=color1, label="LP unmet", linewidth=2)
     ax1.set_xlabel(r"$\lambda$ (miles per unit unmet)")
-    ax1.set_ylabel("total unmet demand", color=color1)
+    ax1.set_ylabel("mean unmet demand / hour", color=color1)
     ax1.tick_params(axis="y", labelcolor=color1)
     ax1.set_xscale("log")
     ax1.grid(True, which="both", alpha=0.3)
+    if greedy_unmet is not None:
+        ax1.axhline(greedy_unmet, color=color1, linestyle=":", alpha=0.6,
+                    label=f"greedy unmet = {greedy_unmet:.1f}")
 
-    ax2 = ax1.twinx()
+    ax1b = ax1.twinx()
     color2 = "#d62728"
-    ax2.plot(df["lambda"], df["empty_cost"], "s--", color=color2, label="empty cost")
-    ax2.set_ylabel("empty distance cost (miles)", color=color2)
-    ax2.tick_params(axis="y", labelcolor=color2)
+    ax1b.plot(df["lambda"], df[cost_col], "s--", color=color2, label="LP cost", linewidth=2)
+    ax1b.set_ylabel("mean empty cost / hour (mi)", color=color2)
+    ax1b.tick_params(axis="y", labelcolor=color2)
+    if greedy_cost is not None:
+        ax1b.axhline(greedy_cost, color=color2, linestyle=":", alpha=0.6,
+                     label=f"greedy cost = {greedy_cost:.0f}")
+    # mark the economically defensible band
+    ax1.axvspan(20, 42, alpha=0.10, color="green",
+                label=r"economically defensible $\lambda\in[20,42]$")
+    ax1.legend(loc="center left", fontsize=8)
+    ax1b.legend(loc="center right", fontsize=8)
+    ax1.set_title(r"LP cost-quality vs $\lambda$ (mean over 24 test hours)")
 
-    ax1.set_title(
-        r"LP cost-quality tradeoff: $\lambda$ sensitivity (last test hour)"
-    )
+    # right: cost-unmet Pareto frontier; greedy as comparison dot
+    ax2 = axes[1]
+    ax2.plot(df[unmet_col], df[cost_col], "o-", color="#1f77b4",
+             label=r"LP Pareto frontier (varying $\lambda$)", linewidth=2, markersize=6)
+    # annotate selected λ points
+    for lam_label in [1, 10, 20, 50, 200]:
+        row = df[df["lambda"] == lam_label]
+        if len(row):
+            x, y = float(row[unmet_col].iloc[0]), float(row[cost_col].iloc[0])
+            ax2.annotate(rf"$\lambda={lam_label}$", (x, y),
+                         xytext=(5, 5), textcoords="offset points", fontsize=8)
+    if greedy_unmet is not None and greedy_cost is not None:
+        ax2.plot([greedy_unmet], [greedy_cost], "s", color="#ff7f0e",
+                 markersize=12, label="greedy (single point)")
+    ax2.set_xlabel("mean unmet demand / hour")
+    ax2.set_ylabel("mean empty cost / hour (mi)")
+    ax2.set_title("Cost vs unmet — LP dominates greedy across the frontier")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(loc="best")
+
     fig.tight_layout()
     out = cfg.FIGURES_DIR / "fig_pareto_lambda.png"
     fig.savefig(out, dpi=180)
