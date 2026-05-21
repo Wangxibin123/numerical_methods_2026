@@ -147,22 +147,19 @@ $\lambda$ 控制 “未满足需求” 的惩罚权重，单位 = mile / unit。
 \end{itemize}
 \end{frame}
 
-% 8
+% 10
 \begin{frame}{北太天元实现流程}
 \small
-\verb|run_all.m| 一键串联 12 步，全部在 Baltamatica 2025 社区版上跑通：
+\texttt{run\_all.m} 一键串联，全部在 Baltamatica 2025 社区版上跑通：
 \begin{enumerate}\itemsep=2pt
-\item \verb|config_project.m| / \verb|load_processed_data.m|
-\item \verb|split_train_test.m|（验证 70/15/15 split\_id）
-\item \verb|predict_historical_mean.m| / \verb|predict_ridge.m|
-\item 对每个测试小时：
-    \begin{itemize}\scriptsize
-    \item \verb|build_rebalance_vectors.m| → $(Q, \widehat P, P^{\text{true}}, S, D)$
-    \item \verb|greedy_rebalance.m|, \verb|solve_rebalance_lp.m|（\verb|linprog|）
-    \item \verb|evaluate_dispatch.m|（评估用 \emph{真实} $P^{\text{true}}$）
-    \end{itemize}
-\item \verb|monte_carlo_robustness.m| + $\lambda$ sensitivity sweep
-\item \verb|export_figure_data.m| 导出 5 张图源 CSV → Python 渲染
+\item 读取 7 个 processed CSV（\texttt{load\_processed\_data.m}）
+\item 验证 70/15/15 时间切分
+\item 拟合 historical mean + Ridge 两个预测器
+\item 对每个测试小时构造 $(S, D, Q, P^{\text{true}})$，
+      同时跑 no-rebalance / greedy / LP 三种方案
+\item $\lambda$ 敏感性扫描（20 个 $\lambda$ $\times$ 24 小时 $=$ 480 个 LP）
+\item Monte Carlo 200 次 Poisson 扰动稳健性
+\item 导出 5 张图源 CSV $\rightarrow$ Python matplotlib 渲染
 \end{enumerate}
 \end{frame}
 

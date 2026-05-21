@@ -187,17 +187,19 @@ $U_t = \sum_j u^{\text{real}}_{j,t}$。
 \section{算法实现}\label{sec:impl}
 \vspace{-0.4em}
 
-\textbf{Python} 仅做数据预处理（\verb|01_download_tlc.py| 下载月度 Parquet；
-\verb|02_preprocess_trips.py| 清洗；\verb|03_build_features.py| 面板与特征；
-\verb|04_build_cost_matrix.py| 成本矩阵；\verb|06_validate.py| 11 项断言）
+\textbf{Python} 仅做数据预处理（下载 Parquet、清洗、面板与特征、成本矩阵、
+11 项数据断言；脚本 \verb|01_download_tlc.py|--\verb|06_validate.py|）
 与最终图像 / PPTX 拼装（\verb|07_render_figures.py| 调 matplotlib 渲染 6 张 PNG，
-\verb|08_build_pptx.py| 把 Beamer 渲染出的幻灯片 PNG + 中文讲稿自动同步进
-\verb|ppt/lecture.pptx| 的讲者备注）。
+\verb|08_build_pptx.py| 把 Beamer 渲染出的幻灯片 PNG 与中文讲稿
+自动同步进 \verb|ppt/lecture.pptx| 的讲者备注）。
 
-\textbf{北太天元} 承担全部数学：\verb|run_all.m| 一键执行读取 → split 校验 →
-拟合两个预测器 → 24 测试小时下 \verb|linprog| 解 LP 同步 greedy / no-rebalance →
-$\lambda$ sensitivity 10 个值 → Monte Carlo 200 Poisson 扰动 → 5 张图源 CSV。
-\verb|tests/| 中 3 个手工可验证小测试（2×2 LP、无缺口、无剩余供给）在
+\textbf{北太天元} 承担全部数学：\verb|run_all.m| 一键执行读取
+$\rightarrow$ split 校验 $\rightarrow$ 拟合两个预测器
+$\rightarrow$ 24 测试小时下 \verb|linprog| 解 LP 同步 greedy / no-rebalance
+$\rightarrow$ $\lambda$ sensitivity 20 个值 × 24 小时
+$\rightarrow$ Monte Carlo 200 Poisson 扰动
+$\rightarrow$ 5 张图源 CSV。
+\verb|tests/| 中 3 个手工可验证小测试（2$\times$2 LP、无缺口、无剩余供给）在
 Baltamatica 2025 社区版上全部通过。社区版兼容性 6 项发现见附录 K。
 
 % ============================================================
@@ -269,24 +271,28 @@ $\lambda$ 的经济学下界 20 与饱和上界 200 之间形成宽阔的稳态�
 \vspace{0.5em}
 
 \section{数据字段说明}\label{app:data-fields}
-\verb|zone_id|, \verb|hour_index| (Unix 小时, int64)；
-\verb|pickup_count|, \verb|dropoff_count|；
-\verb|lag_pickup_{1,2}h|, \verb|lag_dropoff_{1,2}h|；
-\verb|rolling_pickup_mean_{6,24}h|, \verb|rolling_dropoff_mean_6h|；
-\verb|same_hour_prev_{day,week}_pickup|；
-\verb|hour_of_day|, \verb|weekday|, \verb|is_weekend|, \verb|hour_sin|, \verb|hour_cos|；
-\verb|split_id| (0=train/1=val/2=test)。
+面板共 19 列：
+\begin{itemize}\small
+\item \verb|zone_id|, \verb|hour_index|（Unix 小时，int64）
+\item \verb|pickup_count|, \verb|dropoff_count|
+\item \verb|lag_pickup_1h|, \verb|lag_pickup_2h|, \verb|lag_dropoff_1h|, \verb|lag_dropoff_2h|
+\item \verb|rolling_pickup_mean_6h|, \verb|rolling_pickup_mean_24h|, \verb|rolling_dropoff_mean_6h|
+\item \verb|same_hour_prev_day_pickup|, \verb|same_hour_prev_week_pickup|
+\item \verb|hour_of_day|, \verb|weekday|, \verb|is_weekend|, \verb|hour_sin|, \verb|hour_cos|
+\item \verb|split_id|（0=train / 1=val / 2=test）
+\end{itemize}
 
 \section{清洗规则与样本数变化}\label{app:cleaning}
-完整步骤逐行记录在 \verb|results/tables/cleaning_summary.csv|，
-按月份和清洗步骤汇报剩余行数。
+完整步骤逐行记录在 \verb|results/tables/cleaning_summary.csv|，按月份和清洗步骤汇报剩余行数。
 三个月份原始样本 2{,}964{,}624 / 3{,}007{,}526 / 3{,}582{,}628，
-最终干净样本累计 9{,}177{,}579 (综合存活率 96.0\,\%)。
+最终干净样本累计 9{,}177{,}579（综合存活率 96.0\,\%）。
 
 \section{特征工程表}\label{app:feature-engineering}
-所有 lag/rolling/same\_hour 特征均通过
-\verb|groupby('zone_id').shift(N)| 或 \verb|...rolling(N).mean()| 构造；
-前 24 小时或前 7 日窗口不足时 fill 0 而非 NaN，保证零 NaN 进入北太天元。
+所有 lag、rolling、same\_hour 特征均通过 pandas 的
+\verb|groupby('zone_id').shift(N)|
+或对应的 \verb|.rolling(N).mean()|
+构造；前 24 小时或前 7 日窗口不足时 fill 0 而非 NaN，
+保证零 NaN 进入北太天元。
 
 \section{数学模型完整公式}\label{app:math}
 评估阶段使用 \emph{真实} $P^{\text{true}}_{t+1}$ 而非 $\widehat P_{t+1}$；
@@ -308,36 +314,51 @@ $$
 $A$ 矩阵尺寸 $2K \times (K^2 + K)$，上半部分 $K$ 行供给约束，下半部分 $K$ 行需求约束（取负）。
 
 \section{北太天元核心代码索引}\label{app:beita}
-\verb|code/beita/| 共 12 个 \verb|.m| 文件 + 4 个测试，全部在 Baltamatica
-2025 社区版兼容。主要模块：
-\verb|run_all.m| (一键流水线)、
-\verb|config_project.m| (全局参数)、
-\verb|load_processed_data.m| (\verb|fopen+fread+sscanf| 快速 CSV 读)、
-\verb|predict_historical_mean.m| / \verb|predict_ridge.m|、
-\verb|solve_rebalance_lp.m| (column-major LP)、
-\verb|greedy_rebalance.m|、\verb|evaluate_dispatch.m|、
-\verb|monte_carlo_robustness.m|、\verb|export_figure_data.m|；
-\verb|tests/test_*.m| 三个手算验证的小算例。
+\verb|code/beita/| 共 12 个 \verb|.m| 文件 + 4 个测试，全部在 Baltamatica 2025 社区版兼容：
+\begin{itemize}\small
+\item \verb|run_all.m|：一键 12 步主流水线
+\item \verb|config_project.m|：全局参数（$\alpha$, $\lambda$, MC 次数, 种子）
+\item \verb|load_processed_data.m|：\verb|fopen+fread+sscanf| 快速 CSV 读
+\item \verb|predict_historical_mean.m| / \verb|predict_ridge.m|：两个预测器
+\item \verb|solve_rebalance_lp.m|：column-major LP，调 \verb|linprog|
+\item \verb|greedy_rebalance.m|、\verb|evaluate_dispatch.m|
+\item \verb|monte_carlo_robustness.m|、\verb|export_figure_data.m|
+\item \verb|tests/test_*.m|：3 个手算验证的小算例 + \verb|run_all_tests.m|
+\end{itemize}
 
 \section{Python 预处理与渲图说明}\label{app:python}
-\verb|code/python/| 8 个脚本，venv (\verb|.venv/|) 隔离依赖：
-\verb|01..04_*| 下载/清洗/特征/cost；
-\verb|05_optional_maps.py| 可选地图（需 Shapefile）；
-\verb|06_validate.py| 数据完整性 11 项断言；
-\verb|07_render_figures.py| 仅做图像渲染；
-\verb|08_build_pptx.py| 自动把 Beamer PNG + 讲稿同步进 \verb|ppt/lecture.pptx|。
+\verb|code/python/| 8 个脚本，venv（\verb|.venv/|）隔离依赖：
+\begin{itemize}\small
+\item \verb|01..04_*|：下载 / 清洗 / 特征 / cost 矩阵
+\item \verb|05_optional_maps.py|：可选地图（需 Shapefile）
+\item \verb|06_validate.py|：数据完整性 11 项断言
+\item \verb|07_render_figures.py|：仅做图像渲染，不做任何数值计算
+\item \verb|08_build_pptx.py|：自动把 Beamer PNG + 讲稿同步进 \verb|ppt/lecture.pptx|
+\end{itemize}
 
 \section{蒙特卡洛参数}\label{app:mc}
-$M = 200$ 次场景，扰动方式 \verb|'poisson'|（也支持 \verb|'bootstrap'|）。
-随机种子 \verb|rng_seed = 20260521| 保证可复现。
+默认 $M = 200$ 次场景，扰动方式取 Poisson（也支持残差 bootstrap）。
+随机种子固定为 \verb|20260521| 保证可复现。
 对每个场景三种策略 \emph{共用} 固定调度矩阵 $X^\ast$（不重新求解），
-避免 “事后知道需求” 的理想化偏差。
+避免 ``事后知道需求'' 的理想化偏差。
 
 \section{$\lambda$ 敏感性完整表}\label{app:lambda}
 \begin{center}\small
-\begingroup\catcode`\_=12
-\csvautobooktabular{../results/tables/sensitivity_lambda.csv}
-\endgroup
+\begin{tabular}{rrrr}
+\toprule
+$\lambda$ (mi) & mean unmet & mean cost (mi) & mean srv \\
+\midrule
+\csvreader[no head, late after line=\\, separator=comma,
+           filter expr={test{\ifnumgreater{\thecsvinputline}{1}}}]
+  {../results/tables/sensitivity_lambda.csv}{}%
+  {\csvcoli & \csvcolii & \csvcoliii & \csvcoliv}
+\bottomrule
+\end{tabular}
+
+\smallskip
+{\footnotesize 参考基准（恒定）：greedy mean unmet $= 845.0$，greedy mean cost $= 3053.3$ mi。
+$\lambda \le 5$ LP 几乎不调度；$\lambda \in [10, 20]$ 转折区；
+$\lambda \ge 22$ 已完全饱和到同一最优解。}
 \end{center}
 
 \section{AI 工具使用说明}\label{app:ai}
@@ -347,31 +368,42 @@ $\lambda$ 经济推导与实验解读均由三人讨论完成；AI 工具仅在 
 
 \section{北太天元使用问题与建议}\label{app:beita-quirks}
 完整说明见 \verb|docs/beita_usage_notes.md|。Baltamatica 2025 社区版六项兼容性发现：
-无 \verb|figure/plot/print/close|（已迁 Python）；
-\verb|csvread| 在尾换行 + 多行时丢行且数值错乱（已改 \verb|fopen+fread+sscanf|）；
-\verb|error(...)| 不接受 printf 多参数（已统一 \verb|error(sprintf(...))|）；
-\verb|onCleanup| 不可用（try/catch + 手动 fclose）；
-\verb|containers.Map| 不可用（dense 3D 数组索引）；
-测试脚本 \verb|clear| 清掉外层计数器（已去除）。
+\begin{itemize}\small
+\item 无 \verb|figure/plot/print/close|（已迁 Python matplotlib）
+\item \verb|csvread| 在尾换行 + 多行时丢行且数值错乱（已改 \verb|fopen+fread+sscanf|）
+\item \verb|error(...)| 不接受 printf 多参数（已统一 \verb|error(sprintf(...))|）
+\item \verb|onCleanup| 不可用（已用 try/catch + 手动 \verb|fclose|）
+\item \verb|containers.Map| 不可用（已改 dense 3D 数组索引）
+\item 测试脚本 \verb|clear| 清掉外层计数器（已去除）
+\end{itemize}
 
 \section{成员分工}\label{app:roles}
 完整分工见 \verb|docs/division_of_labor.md|。第一组按
 \textbf{Modeling / Data / Presentation} 三个 lead 分工，工作量大致均衡：
-\textbf{22 光华 王溪斌（Modeling Lead）}——LP、Ridge、historical mean、
+\begin{itemize}\small
+\item \textbf{22 光华 王溪斌（Modeling Lead）}：LP、Ridge、historical mean、
 evaluate\_dispatch、$\lambda$ 经济推导、11 个 \verb|.m| + 3 个 LP 单元测试、
-报告 §1·§3·§4·§6 + 附录 D/E/I/K、Makefile；不录视频。
-\textbf{23 信科 陈龙（Data Lead）}——Python 7 个数据脚本（下载/清洗/特征/cost/校验）、
-\verb|06_validate.py| 11 项断言、Monte Carlo 实验设计与 \verb|monte_carlo_robustness.m|、
-报告 §2·§5 + 附录 A/B/G/H、Beamer P1--P8 录音（8 帧 ≈ 11.5 min）。
-\textbf{23 元培 汤平之（Presentation Lead）}——
-\verb|07_render_figures.py| 渲 6 张 PNG、\verb|08_build_pptx.py| 自动 PPTX 拼装、
-\verb|export_figure_data.m|、报告 \& Beamer 排版（含 ctex 调试）、报告 §5 解读 +
-附录 C/F/J/L/M、4 个 \verb|docs/*.md|、Beamer P9--P15 录音（7 帧 ≈ 9.5 min）
-+ PowerPoint 合成 + MP4 导出。
+报告 §1·§3·§4·§6 + 附录 D / E / I / K、Makefile；不录视频。
+\item \textbf{23 信科 陈龙（Data Lead）}：
+Python 7 个数据脚本（下载 / 清洗 / 特征 / cost 矩阵 / 校验）、
+\verb|06_validate.py| 11 项断言、Monte Carlo 实验设计与
+\verb|monte_carlo_robustness.m|、报告 §2·§5 + 附录 A / B / G / H、
+Beamer P1--P8 录音（8 帧约 11.5 min）。
+\item \textbf{23 元培 汤平之（Presentation Lead）}：渲 6 张 PNG
+（\texttt{07\_render\_figures.py}）、自动 PPTX 拼装
+（\texttt{08\_build\_pptx.py}）、北太图源导出
+（\texttt{export\_figure\_data.m}）；
+报告与 Beamer 排版（含 ctex 调试）、报告 §5 解读、附录 C / F / J / L / M；
+4 个 docs markdown 文档；Beamer P9--P15 录音（7 帧约 9.5 min）、
+PowerPoint 合成与 MP4 导出。
+\end{itemize}
 
 \section{复现说明}\label{app:reproduce}
-\verb|make data| (下载/清洗/特征/验证) → \verb|make experiment| (北太天元 + 渲图)
-→ \verb|make report| / \verb|make slides| / \verb|make pptx|。
+\begin{itemize}\small
+\item \verb|make data|：下载、清洗、特征、cost 矩阵、11 项数据校验
+\item \verb|make experiment|：北太天元 LP 流水线 + Python 渲图
+\item \verb|make report| / \verb|make slides| / \verb|make pptx|：编译报告 / Beamer / 自动生成讲者备注 PPTX
+\end{itemize}
 详细步骤、协作者数据导入、期望数值对照表见 \verb|docs/reproduce.md|。
 
 \section{完整图表合集}\label{app:figures}
