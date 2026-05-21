@@ -5,6 +5,7 @@
 #   make report     — compile report.pdf
 #   make slides     — compile slides.pdf
 #   make video-prep — slides.pdf → rendered PNGs (for PowerPoint import)
+#   make pptx       — auto-build ppt/lecture.pptx with PNGs + narration notes
 #   make tests      — run 3 LP unit tests in Baltamatica
 #   make all        — data + experiment + report + slides
 #   make clean      — remove processed/, results/, build artifacts
@@ -20,7 +21,7 @@ MONTHS   ?= 1 2 3
 TOPK     ?= 50
 
 .PHONY: all venv data preprocess validate experiment figures \
-        report slides video-prep tests clean distclean
+        report slides video-prep pptx tests clean distclean
 
 all: data experiment report slides
 
@@ -80,6 +81,11 @@ video-prep: slides
 	mkdir -p slides/rendered
 	pdftoppm -png -r 220 slides/main.pdf slides/rendered/slide
 	@echo "→ slides/rendered/*.png ready"
+
+pptx: video-prep
+	@echo "==> building PPTX with embedded narration notes"
+	$(PY) code/python/08_build_pptx.py
+	@echo "→ ppt/lecture.pptx ready (open in PowerPoint, then Record Slide Show)"
 
 clean:
 	@echo "==> cleaning processed + results + LaTeX builds"

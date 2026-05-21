@@ -33,37 +33,37 @@
 
 \title{城市出租车供需错配与空驶再平衡优化\\
        \large 基于 NYC TLC Yellow Taxi 分区小时流数据的预测—优化模型}
-\author{Group X\\
-        \small Member A · Member B · Member C}
+\author{第一组\\
+        \small 23 信科 陈龙 \quad 22 光华 王溪斌 \quad 23 元培 汤平之}
 \date{\today}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-本文以 NYC TLC Yellow Taxi 公开行程数据为基础，构造分区 (zone) × 小时 (hour) 的供需面板，
-拟合下一小时区域乘车需求的预测模型，并把预测结果作为输入，求解空车再平衡的线性规划。
-我们对比三种调度策略 — 不调度、最近邻贪心和 LP 全局优化 — 并通过蒙特卡洛模拟评估
-LP 方案在需求扰动下的稳健性。所有大规模 Parquet 预处理在 Python 中完成；预测、LP、
-基线对比、蒙特卡洛、敏感性分析、所有数据生成均在北太天元中完成；Python 仅负责把
-北太天元导出的 CSV 渲染为最终图像。
+本文以 NYC TLC Yellow Taxi 公开行程数据为基础，构造分区 × 小时的供需面板，
+拟合下一小时区域乘车需求的预测模型，并把预测结果作为输入求解空车再平衡的线性规划。
+对比三种调度策略——不调度、最近邻贪心和 LP 全局优化——并通过蒙特卡洛模拟评估
+LP 方案在需求扰动下的稳健性。原始 Parquet 的下载与清洗在 Python 中完成，
+预测、LP、基线对比、蒙特卡洛、敏感性分析等全部数值计算在北太天元中完成；
+Python 仅负责把北太天元导出的 CSV 渲染为最终图像。
 
-\textbf{核心发现：} 在 24 个测试小时上，LP 在保持与贪心相同未满足需求水平的同时，
-将空驶距离成本平均降低 \emph{2--5 倍}（部分小时降幅达 3.5 倍以上），且这一优势在
-Monte Carlo 200 次需求扰动场景下保持稳定。
+\textbf{核心结果}：在 24 个测试小时上，LP 在保持与贪心相同未满足需求水平的同时，
+将空驶距离成本平均降低 2--5 倍（多个小时下降幅超过 3 倍），
+且这一优势在蒙特卡洛 200 次需求扰动场景下保持稳定。
 \end{abstract}
 
 % ============================================================
 \section{背景与问题}\label{sec:bg}
 
-城市出租车系统存在显著的时空供需错配：在工作日的某些时段，曼哈顿核心区会出现“车少人多”，
-而部分外围或机场区域则会出现“车多人少”。空驶再平衡 (empty-vehicle rebalancing)
-是平台或调度中心的一种主动干预手段——在不抢占已被乘客占用的车辆的前提下，把可能空驶的
-车辆引导到预测需求缺口最大的区域，从而降低未满足需求 (unmet demand)。
+城市出租车系统在不同时段、不同区域之间存在显著的供需错配：工作日晚高峰
+曼哈顿核心区常常车少人多，机场和外围区域则相反。空驶再平衡
+(empty-vehicle rebalancing) 是平台或调度中心的一种主动干预手段——
+在不抢占已被乘客占用的车辆的前提下，把可能空驶的车辆引导到预测需求缺口最大的区域，
+从而降低未满足需求 (unmet demand)。
 
-本文不试图复刻平台的实时车辆库存，因为该数据并不公开；我们改用一个 \emph{保守可解释} 的
-供给代理：当前小时各区域的 dropoff 数 $Q_{i,t}$。
-研究问题为：
+平台实时车辆库存数据并不公开，本文改用一个保守可解释的供给代理：
+当前小时各区域的 dropoff 数 $Q_{i,t}$。研究问题为：
 
 \begin{quote}
 \itshape 给定 $(Q_{i,t})$ 以及历史 pickup 时序，预测下一小时各区域需求 $\widehat P_{i,t+1}$，
@@ -95,11 +95,13 @@ train / val / test 按时间切分 70\,\% / 15\,\% / 15\,\%，
 \textbf{不做随机切分}，避免时间泄漏。详细字段定义见附录 A。
 
 \paragraph{数据完整性}
-我们在 Python 端额外维护一个 \verb|06_validate.py| 脚本，对所有 7 个 processed 文件运行
-11 个独立断言（文件大小、列对齐、按 (zone, hour\_index) 升序、每个 zone 的 hour\_index
-完全连续无缺、cost matrix 对角为 0 且非对角正且有限、test\_hours 完全落在 test 切分内、
-split 占比误差不超过 5\,\%、无 NaN 单元、$\ge 0$ 计数、特征列已 fill、清洗存活率 $\in (0.5,1.0)$）。
+Python 端 \verb|06_validate.py| 对全部 7 个 processed 文件运行 11 项独立断言
+（文件大小、列对齐、按 (zone, hour\_index) 升序、每个 zone 的 hour\_index 连续无缺、
+cost matrix 对角为 0 且非对角正而有限、test\_hours 全部落在 test 切分内、
+split 占比误差不超过 5\,\%、无 NaN、计数非负、lag/rolling 列已 fill、清洗存活率 $\in (0.5,1.0)$）。
 任一断言失败立即报错，避免脏数据进入北太天元主流水线。
+TLC 编号 264（Unknown）和 265（Outside of NYC）这两个 catch-all 占位 zone 在选 top-50
+时被显式排除。
 
 % ============================================================
 \section{数学模型}\label{sec:model}
@@ -118,7 +120,7 @@ $$
 \widehat P_{i,t+1} = \max(z_{i,t}^\top \widehat\beta, 0).
 $$
 基线为 \emph{(zone, weekday, hour\_of\_day)} 历史均值。
-我们采用 \textbf{两者中测试 MAE 较低者} 作为下游 LP 的输入。
+下游 LP 输入采用两者中测试 MAE 较低的预测器。
 
 \paragraph{需求缺口与剩余供给}
 $$
@@ -144,8 +146,8 @@ $$
 \sum_i x_{ij,t} + u_{j,t} \ge D_{j,t+1}\;\;\forall j,\quad
 x_{ij,t}\ge 0,\;u_{j,t}\ge 0.
 $$
-$\lambda$ 表示“漏掉 1 个 trip 等价于多少英里空驶”，是策略参数。
-连续 LP relaxation —— $x_{ij}$ 可解释为期望调度强度。
+$\lambda$ 表示“漏掉 1 个 trip 等价于多少英里空驶”，是策略参数（与 $c_{ij}$ 同量纲）。
+本文使用连续 LP relaxation，$x_{ij}$ 解释为期望调度强度。
 LP 矩阵的 column-major 构造详见附录 E。
 
 \paragraph{评价指标}
@@ -177,10 +179,13 @@ $U_t = \sum_j u^{\text{real}}_{j,t}$ 为总未满足需求；
 全部在 Baltamatica 2025 社区版上通过。
 北太天元社区版兼容性说明见附录 K。
 
-\paragraph{Python 仅做图像渲染}
+\paragraph{Python 仅做图像渲染与最终 PPTX 拼装}
 \verb|07_render_figures.py| 读取北太天元导出的 5 个 \verb|fig_data_*.csv| 与
-\verb|sensitivity_lambda.csv|，调用 matplotlib 生成 6 张 PNG。
-\emph{不做任何数值计算} —— 这一分工保证“模型、优化与统计完全由北太天元负责”。
+\verb|sensitivity_lambda.csv|，调用 matplotlib 生成 6 张 PNG，
+不做任何数值计算。\verb|08_build_pptx.py| 把 Beamer 渲染出的 14 张幻灯片 PNG
+自动铺到一个新的 \verb|ppt/lecture.pptx| 中，并把 \verb|slides/narration.md|
+里对应的中文讲稿写到讲者备注，使得 Beamer 内容改动后只需
+\verb|make pptx| 即可重新生成讲解 PPTX，团队成员直接打开录音即可。
 
 % ============================================================
 \section{实验结果}\label{sec:result}
@@ -248,21 +253,22 @@ LP 与 greedy 同样稳健，远优于 no-rebalance。}
 % ============================================================
 \section{结论与局限}\label{sec:limit}
 
-LP 全局优化的空车再平衡方案在我们 24 个代表性测试小时上一致达到与贪心相同的未满足
-需求水平，但 \emph{空驶成本平均低 2--5 倍}。该结果支持
-“即使在缺乏实时车辆位置数据的情况下，凭借 dropoff 流的 zone-hour 聚合也可以构造
-可执行的、相对贪心 \emph{严格更优} 的调度策略”这一论点。
-LP 的优势在 Monte Carlo 下保持稳定。
+LP 全局优化的空车再平衡方案在 24 个代表性测试小时上一致达到与贪心相同的未满足
+需求水平，但空驶成本平均低 2--5 倍。该结果支持本文论点：
+即使在缺乏实时车辆位置数据的情况下，凭借 dropoff 流的 zone-hour 聚合
+也可以构造相对贪心严格更优的调度策略。
+LP 的优势在 Monte Carlo 200 次扰动下保持稳定。
 
-但本工作存在若干 \emph{诚实的} 局限：
+本工作存在六项局限：
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
-\item dropoff 流只是供给的代理；真实平台拥有的实时车辆库存与本数据不完全等价。
-\item 我们没有天气、道路拥堵、大型活动等外生数据。
-\item LP 是连续 relaxation，$x_{ij}$ 应理解为 \emph{期望} 调度强度。
+\item dropoff 流只是供给代理；真实平台拥有的实时车辆库存与本数据不完全等价。
+\item 没有天气、道路拥堵、大型活动等外生数据。
+\item LP 是连续 relaxation，$x_{ij}$ 是期望调度强度，部署需要额外的整数化步骤。
 \item 成本矩阵基于历史 trip\_distance 中位数，未考虑实时路况。
 \item 评估假设调度可以瞬时执行，未模拟驾驶时延。
-\item Ridge 不带 zone embedding，性能弱于强基线历史均值。
+\item Ridge 不带 zone embedding，性能弱于强基线历史均值；
+      后续工作可以加入 zone-level 固定效应。
 \end{enumerate}
 
 % ============================================================
@@ -367,7 +373,17 @@ $\lambda$ 选择与实验解读均由三人讨论完成；AI 工具仅在 Python
 \end{itemize}
 
 \section{成员分工}\label{app:roles}
-见 \verb|docs/division_of_labor.md|；建议 3 人组按 Data / Modeling / Slides 分工。
+完整分工见 \verb|docs/division_of_labor.md|。
+第一组按 Data / Modeling / Slides 分工：
+\begin{itemize}\small
+\item \textbf{22 光华 王溪斌}：项目主架构、北太天元 \verb|.m| 代码、LP 公式与实现、
+      Monte Carlo \& $\lambda$ 敏感性、数据完整性 11 项校验、Makefile 与复现说明、
+      报告主体撰写。不录视频。
+\item \textbf{23 信科 陈龙}：NYC TLC 数据 pipeline（下载 / 清洗 / 面板 / cost 矩阵），
+      Beamer 前 7 页录音。
+\item \textbf{23 元培 汤平之}：报告与 Beamer 排版（含 ctex 调试），
+      图表对齐与说明，Beamer 后 7 页录音，PowerPoint 合成与 MP4 导出。
+\end{itemize}
 
 \section{复现说明}\label{app:reproduce}
 完整步骤：\verb|make data| (下载 + 清洗 + 特征 + 验证) →
