@@ -351,14 +351,4 @@ s.t. $\sum_j x_{ij}\le S_i,\;\sum_i x_{ij}+u_j\ge D_j,\;x_{ij},u_j\ge 0$.
 均由三人讨论完成；AI 工具仅在 Python / LaTeX 脚手架与样板格式上做过辅助，
 所有产出均经过单元测试、scipy 镜像或人工对算验证。
 
-## 13. 北太天元社区版兼容性
-
-社区版有 6 项与桌面版/MATLAB 不同的行为，已全部 workaround：
-- 无 `figure/plot/print/close`（已迁 Python matplotlib）
-- `csvread` 在尾换行+多行时丢行且数值错乱（已改 `fopen+fread+sscanf`）
-- `error(fmt, args)` 不接受 printf 多参数（已统一 `error(sprintf(...))`）
-- `onCleanup` 不可用（try/catch + 手动 fclose）
-- `containers.Map` 不可用（已改 dense 3D 数组索引）
-- 测试脚本 `clear` 清掉外层计数器（已去除）
-
-详细：[docs/beita_usage_notes.md](docs/beita_usage_notes.md)。
+北太天元社区版兼容性踩坑记录见 [docs/beita_usage_notes.md](docs/beita_usage_notes.md)（已全部 workaround，正常使用无需关心）。
